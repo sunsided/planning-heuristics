@@ -7,4 +7,5 @@ mod fixtures;
 mod landmarks;
 mod oracle;
 mod random;
+mod red_black;
 mod width_search;

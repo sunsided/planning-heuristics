@@ -1,4 +1,4 @@
-//! Benchmarks for `h_max`, `h_add`, `h_FF` and the landmark heuristics, next to width-search's sweep-based `h_add`.
+//! Benchmarks for `h_max`, `h_add`, `h_FF`, `h_RB` and the landmark heuristics, next to width-search's sweep-based `h_add`.
 //!
 //! Each benchmark evaluates a fixed set of reachable states (breadth-first from the initial
 //! state) of one task. The larger tasks (`bw-large-a`, `logistics-e`, GPL-2.0 / Apache-2.0
@@ -8,7 +8,9 @@ use std::collections::{HashSet, VecDeque};
 use std::hint::black_box;
 
 use criterion::Criterion;
-use planning_heuristics::{HAdd, HFf, HMax, Heuristic, LandmarkCount, UniformLandmarkCost};
+use planning_heuristics::{
+    HAdd, HFf, HMax, Heuristic, LandmarkCount, RedBlack, UniformLandmarkCost,
+};
 use sas_plus::fdr::SasFile;
 use sas_plus::random::{RandomTaskParams, random_task};
 use sas_plus::{State, Task};
@@ -97,6 +99,7 @@ fn bench_task(criterion: &mut Criterion, name: &str, task: &Task) {
     bench_heuristic(&mut group, "h_max", HMax::new(task), &states);
     bench_heuristic(&mut group, "h_add", HAdd::new(task), &states);
     bench_heuristic(&mut group, "h_ff", HFf::new(task), &states);
+    bench_heuristic(&mut group, "h_rb", RedBlack::new(task), &states);
     bench_heuristic(&mut group, "lm_count", LandmarkCount::new(task), &states);
     bench_heuristic(
         &mut group,

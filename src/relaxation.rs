@@ -189,6 +189,11 @@ impl Relaxation {
         &self.rules
     }
 
+    /// The axiom rules, in task order.
+    pub(crate) fn axiom_rules(&self) -> &[Rule] {
+        &self.rules[self.first_axiom..]
+    }
+
     /// The rules of operator `op`, one per effect.
     pub(crate) fn op_rules(&self, op: OpId) -> &[Rule] {
         &self.rules[self.op_rules[op].clone()]
