@@ -25,15 +25,17 @@ pub trait Heuristic<S, C = u32> {
     fn estimate(&mut self, state: &S) -> Option<C>;
 }
 
-impl<S, C, F: FnMut(&S) -> Option<C>> Heuristic<S, C> for F { /* calls F */ }
+impl<S, C, H: Heuristic<S, C> + ?Sized> Heuristic<S, C> for &mut H { /* forwards */ }
+impl<S, C, H: Heuristic<S, C> + ?Sized> Heuristic<S, C> for Box<H> { /* forwards */ }
+
+pub fn heuristic_fn<S, C, F: FnMut(&S) -> Option<C>>(f: F) -> HeuristicFn<F>;
 ```
 
-`&mut self` lets a heuristic reuse working memory without interior mutability. A blanket
-`impl Heuristic for &mut H` cannot coexist with the closure impl: `&mut F` is itself `FnMut`,
-so the two overlap (E0119, checked with rustc 1.100). This crate keeps the closure blanket and
-adds explicit `impl Heuristic for &mut HMax<'_>` (and `HAdd`, `HFf`), which coherence allows
-because the types are local. heuristic-search should pick one of the two blankets too; other
-heuristics can always be passed as `|s| h.estimate(s)`.
+Exactly as heuristic-search `draft/initial` (60d01f4), except that the cost parameter defaults
+to `u32` here. `&mut self` lets a heuristic reuse working memory without interior
+mutability; searches take the heuristic by value, and `&mut h` keeps it with its workspace.
+A blanket impl for closures would overlap with the `&mut H` impl (`&mut F` is itself
+`FnMut`, E0119), so closures go through `heuristic_fn`.
 
 Same shape and semantics as `heuristic_search::Heuristic<S, C>` (draft branch): `Option<C>`,
 `None` only when no goal is reachable, `u32` as default cost. Rules for cost types:

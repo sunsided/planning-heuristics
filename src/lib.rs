@@ -54,6 +54,8 @@
 
 extern crate alloc;
 
+use alloc::boxed::Box;
+
 mod delete_relaxation;
 mod relaxation;
 
@@ -62,7 +64,7 @@ pub use relaxation::{Combine, Exploration, Relaxation, RelaxedPlan};
 
 /// An estimate of the cost from a state of type `S` to the nearest goal, in cost type `C`.
 ///
-/// Same signature and semantics as `heuristic_search::Heuristic`, so that a later shared
+/// Same signature and semantics as `heuristic_search::Heuristic` (its `draft/initial`), so that a later shared
 /// trait (in `heuristic-search` or `search-core`) can replace this one without changing
 /// behaviour. `estimate` takes `&mut self` so a heuristic can reuse working memory without
 /// interior mutability; share the read-only part (such as a [`Relaxation`]) by reference and
@@ -72,9 +74,9 @@ pub use relaxation::{Combine, Exploration, Relaxation, RelaxedPlan};
 /// when it is narrowed (an estimate never wraps around), and a float estimate over integer
 /// costs rounds up (`ceil`), which keeps admissibility.
 ///
-/// Implemented for every `FnMut(&S) -> Option<C>`, and for `&mut H` of each heuristic of this
-/// crate. A blanket impl for every `&mut H: Heuristic` cannot coexist with the closure impl
-/// (`&mut F` is itself `FnMut`), so wrap other heuristics as `|s| h.estimate(s)`.
+/// Implemented for `&mut H` and `Box<H>` of any heuristic `H` (so `Box<dyn Heuristic<S, C>>`
+/// works), and for closures through [`heuristic_fn`]. A blanket impl for closures cannot
+/// coexist with the one for `&mut H`, because `&mut F` is itself a closure.
 pub trait Heuristic<S, C = u32> {
     /// Estimates the remaining cost from `state` to a goal.
     ///
@@ -83,9 +85,41 @@ pub trait Heuristic<S, C = u32> {
     fn estimate(&mut self, state: &S) -> Option<C>;
 }
 
-impl<S, C, F: FnMut(&S) -> Option<C>> Heuristic<S, C> for F {
+impl<S, C, H: Heuristic<S, C> + ?Sized> Heuristic<S, C> for &mut H {
     fn estimate(&mut self, state: &S) -> Option<C> {
-        self(state)
+        (**self).estimate(state)
+    }
+}
+
+impl<S, C, H: Heuristic<S, C> + ?Sized> Heuristic<S, C> for Box<H> {
+    fn estimate(&mut self, state: &S) -> Option<C> {
+        (**self).estimate(state)
+    }
+}
+
+/// Turns a closure `FnMut(&S) -> Option<C>` into a [`Heuristic`].
+///
+/// # Examples
+///
+/// ```
+/// use planning_heuristics::{Heuristic, heuristic_fn};
+///
+/// let mut h = heuristic_fn(|n: &u32| 10_u32.checked_sub(*n));
+///
+/// assert_eq!(h.estimate(&3), Some(7));
+/// assert_eq!(h.estimate(&12), None);
+/// ```
+pub fn heuristic_fn<S, C, F: FnMut(&S) -> Option<C>>(f: F) -> HeuristicFn<F> {
+    HeuristicFn(f)
+}
+
+/// A closure used as a [`Heuristic`]; created by [`heuristic_fn`].
+#[derive(Debug, Clone, Copy)]
+pub struct HeuristicFn<F>(F);
+
+impl<S, C, F: FnMut(&S) -> Option<C>> Heuristic<S, C> for HeuristicFn<F> {
+    fn estimate(&mut self, state: &S) -> Option<C> {
+        (self.0)(state)
     }
 }
 

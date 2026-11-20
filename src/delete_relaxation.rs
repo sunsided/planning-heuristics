@@ -64,12 +64,6 @@ macro_rules! relaxation_heuristic {
                 self.value(state).map(|v| u32::try_from(v).unwrap_or(u32::MAX))
             }
         }
-
-        impl Heuristic<State> for &mut $name<'_> {
-            fn estimate(&mut self, state: &State) -> Option<u32> {
-                (**self).estimate(state)
-            }
-        }
     };
 }
 

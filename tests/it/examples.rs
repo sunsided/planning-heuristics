@@ -145,3 +145,31 @@ fn u32_estimate_saturates() {
     assert_eq!(h_add.value(&state), Some(2 * u64::from(u32::MAX)));
     assert_eq!(h_add.estimate(&state), Some(u32::MAX));
 }
+
+/// The heuristics work boxed as trait objects and through `&mut`.
+#[test]
+fn boxed_and_borrowed_heuristics() {
+    let task = binary_task(
+        1,
+        vec![op(vec![Effect::new(Fact::new(0, 1))], 2)],
+        vec![Fact::new(0, 1)],
+    );
+    let state = task.initial_state();
+    let mut boxed: Vec<Box<dyn Heuristic<State>>> = vec![
+        Box::new(HMax::new(&task)),
+        Box::new(HAdd::new(&task)),
+        Box::new(HFf::new(&task)),
+    ];
+    for h in &mut boxed {
+        assert_eq!(h.estimate(&state), Some(2));
+    }
+
+    let mut h_max = HMax::new(&task);
+    assert_eq!(estimate_once(&mut h_max, &state), Some(2));
+    assert_eq!(h_max.value(&state), Some(2));
+}
+
+/// Takes a heuristic by value, as searches do.
+fn estimate_once(mut heuristic: impl Heuristic<State>, state: &State) -> Option<u32> {
+    heuristic.estimate(state)
+}
