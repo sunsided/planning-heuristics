@@ -467,3 +467,50 @@ fn dag_painting_moves_ancestors() {
         Err(PaintingError::Cyclic(_, _))
     ));
 }
+
+/// Regression: in the DAG fragment the repair must only use transitions whose black
+/// preconditions were already visited (the projected task `Π^B` of Domshlak, Hoffmann & Katz
+/// 2015, Figure 4). Black `a` (0, 1, 2) is the parent of black `b`; `a = 2` needs a red fact
+/// nothing achieves. Moving `b` back to 0 for the goal is cheap via `a = 2` and dear via the
+/// visited `a = 1`; an unrestricted path search picks the cheap one, cannot move `a` to 2 and
+/// falls back to `h_FF`. Both variables are RSE-invertible, so the paper guarantees a repair.
+#[test]
+fn dag_repair_stays_on_visited_values() {
+    let (a, b, r, q) = (0, 1, 2, 3);
+    let step = |pre: Vec<Fact>, eff: Fact, cost: u32| Operator {
+        cost,
+        ..op(pre, vec![Effect::new(eff)])
+    };
+    let task = Task {
+        variables: vec![
+            Variable::new("a", 3),
+            Variable::new("b", 2),
+            Variable::new("r", 2),
+            Variable::new("q", 2),
+        ],
+        operators: vec![
+            step(vec![Fact::new(a, 0)], Fact::new(a, 1), 1),
+            step(vec![Fact::new(a, 1)], Fact::new(a, 0), 1),
+            step(vec![Fact::new(a, 1), Fact::new(r, 1)], Fact::new(a, 2), 1),
+            step(vec![Fact::new(a, 2), Fact::new(r, 1)], Fact::new(a, 1), 1),
+            step(vec![Fact::new(a, 2), Fact::new(b, 0)], Fact::new(b, 1), 1),
+            step(vec![Fact::new(a, 2), Fact::new(b, 1)], Fact::new(b, 0), 1),
+            step(vec![Fact::new(a, 1), Fact::new(b, 0)], Fact::new(b, 1), 10),
+            step(vec![Fact::new(a, 1), Fact::new(b, 1)], Fact::new(b, 0), 10),
+            step(vec![Fact::new(b, 1)], Fact::new(q, 1), 1),
+        ],
+        initial: State(vec![0, 0, 0, 0]),
+        goal: vec![Fact::new(q, 1), Fact::new(b, 0)],
+        axioms: vec![],
+    };
+    let state = task.initial_state();
+    let painting = Painting::dag(&task, vec![a, b]).unwrap();
+    let plan = RedBlack::with_painting(&task, &painting)
+        .plan(&state)
+        .unwrap();
+
+    assert_eq!(HFf::new(&task).value(&state), Some(12));
+    assert!(plan.is_repaired());
+    assert!(is_red_black_plan(&task, &[a, b], &state, plan.ops()));
+    assert_eq!(plan.cost(), 22);
+}

@@ -4,7 +4,7 @@ use alloc::vec::Vec;
 
 use sas_plus::{OpId, State};
 
-use super::tables::Tables;
+use super::tables::{Tables, Transition};
 use crate::Relaxation;
 
 /// The red-black state and plan of one repair, with buffers reused across states.
@@ -15,6 +15,10 @@ pub(super) struct Repair {
     holds: Vec<bool>,
     /// The current value of each black variable.
     black: Vec<u32>,
+    /// Whether each fact was ever true in this repair; read for black facts only (red facts
+    /// never become false, so for them this is [`Repair::holds`]). The black part of the
+    /// set `F` of Domshlak, Hoffmann & Katz (2015, Figure 4).
+    visited: Vec<bool>,
     /// The red-black plan so far.
     pub plan: Vec<OpId>,
     /// Its cost so far.
@@ -97,6 +101,7 @@ impl Repair {
                 .zip(&tables.domain)
                 .map(|(&offset, &n)| value_of(&self.holds, offset, n)),
         );
+        self.visited.clone_from(&self.holds);
         self.plan.clear();
         self.cost = 0;
         self.steps = 0;
@@ -143,6 +148,7 @@ impl Repair {
             let offset = tables.black_offsets[b];
             self.holds[offset + self.black[b] as usize] = false;
             self.holds[offset + value as usize] = true;
+            self.visited[offset + value as usize] = true;
             self.black[b] = value;
         }
 
@@ -205,6 +211,11 @@ impl Repair {
     /// Dijkstra over the values of black variable `b` from its current value, through the
     /// transitions whose red preconditions hold; fills [`Repair::dist`] and [`Repair::via`].
     /// Domains are small, so the open value is found by a linear scan.
+    ///
+    /// With linked black variables only transitions of the projected task `Π^B` count: the
+    /// black preconditions and the value reached must have been visited
+    /// ([`Repair::usable_in_dag`]). Without links there are no black outside conditions and
+    /// any value may be reached, as in Katz, Hoffmann & Domshlak (AAAI 2013).
     fn cheapest_paths(&mut self, tables: &Tables, b: usize) {
         let n = tables.domain[b] as usize;
         refill(&mut self.dist, n, None);
@@ -217,7 +228,8 @@ impl Repair {
             for t in &tables.transitions[b] {
                 let usable = t.from.is_none_or(|from| from as usize == x)
                     && t.to as usize != x
-                    && tables.red_pre[t.op].iter().all(|&f| self.holds[f]);
+                    && tables.red_pre[t.op].iter().all(|&f| self.holds[f])
+                    && (!tables.linked || self.usable_in_dag(tables, b, t));
                 let next = d.saturating_add(tables.cost[t.op]);
                 let to = t.to as usize;
                 if usable && self.dist[to].is_none_or(|old| next < old) {
@@ -226,6 +238,19 @@ impl Repair {
                 }
             }
         }
+    }
+
+    /// Whether transition `t` of black variable `b` belongs to the projected task `Π^B` of
+    /// Domshlak, Hoffmann & Katz (2015, Figure 4): its black preconditions and the value it
+    /// reaches were visited. With RSE-invertible black variables this keeps every
+    /// precondition an ancestor is asked for reachable (their Theorem 11).
+    fn usable_in_dag(&self, tables: &Tables, b: usize, t: &Transition) -> bool {
+        let fact = |b: usize, value: u32| tables.black_offsets[b] + value as usize;
+
+        self.visited[fact(b, t.to)]
+            && tables.black_pre[t.op]
+                .iter()
+                .all(|&(c, value)| self.visited[fact(c, value)])
     }
 
     /// The value with the smallest distance that is not final yet.
