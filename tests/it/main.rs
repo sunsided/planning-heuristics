@@ -5,6 +5,7 @@ mod abstraction;
 mod check;
 mod examples;
 mod fixtures;
+mod hm;
 mod landmarks;
 mod lm_cut;
 mod oracle;

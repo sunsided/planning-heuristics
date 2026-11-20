@@ -7,6 +7,9 @@
 //! - [`HMax`], [`HAdd`] and [`HFf`]: the delete-relaxation heuristics `h_max`, `h_add` and
 //!   `h_FF` (Bonet & Geffner 2001, Hoffmann & Nebel 2001), computed with a worklist
 //!   (generalized Dijkstra) over [`Relaxation`], which also extracts [`RelaxedPlan`]s.
+//! - [`HSetAdd`]: the set-additive heuristic `h_sa` (Keyder & Geffner 2008); [`AdditiveHMax`]:
+//!   `h_max` summed over a partition of the operator costs; [`H2`]: `h²` (Haslum & Geffner
+//!   2000), which sees pairs of facts.
 //! - [`RedBlack`]: the red-black heuristic `h_RB` by relaxed plan repair (Domshlak, Hoffmann &
 //!   Katz 2015), with the black variables chosen by a [`Painting`]: greedy, by causal graph
 //!   level ([`CausalLevel`]) or conflict-directed.
@@ -72,15 +75,20 @@
 extern crate alloc;
 
 mod abstraction;
+mod additive_max;
 mod delete_relaxation;
+mod h2;
 mod landmarks;
 mod lm_cut;
 mod path;
 mod red_black;
 mod relaxation;
+mod set_additive;
 
 pub use abstraction::{AbstractionHeuristic, Adapter, GoalDistance};
+pub use additive_max::AdditiveHMax;
 pub use delete_relaxation::{HAdd, HFf, HMax};
+pub use h2::{H2, H2Error};
 #[cfg(feature = "lp")]
 pub use landmarks::OptimalLandmarkCost;
 pub use landmarks::{
@@ -91,6 +99,7 @@ pub use lm_cut::{ActionLandmark, LmCut};
 pub use path::{PathHeuristic, Stateless};
 pub use red_black::{CausalLevel, Painting, PaintingError, RedBlack, RedBlackPlan};
 pub use relaxation::{Combine, Exploration, Relaxation, RelaxedPlan};
+pub use set_additive::HSetAdd;
 // The shared trait of the planning crates: `planning_heuristics::Heuristic` and
 // `search_core::Heuristic` are one trait. A doc comment here would be prepended to all three.
 pub use search_core::{Heuristic, HeuristicFn, heuristic_fn};
@@ -109,6 +118,9 @@ const _: () = {
     send::<UniformLandmarkCost<'static>>();
     send::<RedBlack<'static>>();
     send::<LmCut<'static>>();
+    send::<HSetAdd<'static>>();
+    send::<AdditiveHMax>();
+    send::<H2>();
     send::<LandmarkTracker<'static>>();
     send::<AbstractionHeuristic<sas_plus::Projection>>();
 };

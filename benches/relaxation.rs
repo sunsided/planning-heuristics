@@ -9,8 +9,8 @@ use std::hint::black_box;
 
 use criterion::Criterion;
 use planning_heuristics::{
-    HAdd, HFf, HMax, Heuristic, LandmarkCount, LandmarkTracker, LmCut, PathHeuristic, RedBlack,
-    TrackingMode, UniformLandmarkCost,
+    HAdd, HFf, HMax, HSetAdd, Heuristic, LandmarkCount, LandmarkTracker, LmCut, PathHeuristic,
+    RedBlack, TrackingMode, UniformLandmarkCost,
 };
 use sas_plus::fdr::SasFile;
 use sas_plus::random::{RandomTaskParams, random_task};
@@ -100,6 +100,7 @@ fn bench_task(criterion: &mut Criterion, name: &str, task: &Task) {
     bench_heuristic(&mut group, "h_max", HMax::new(task), &states);
     bench_heuristic(&mut group, "h_add", HAdd::new(task), &states);
     bench_heuristic(&mut group, "h_ff", HFf::new(task), &states);
+    bench_heuristic(&mut group, "h_sa", HSetAdd::new(task), &states);
     bench_heuristic(&mut group, "h_rb", RedBlack::new(task), &states);
     bench_heuristic(&mut group, "lm_cut", LmCut::new(task), &states);
     bench_heuristic(&mut group, "lm_count", LandmarkCount::new(task), &states);

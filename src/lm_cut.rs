@@ -2,7 +2,7 @@
 //!
 //! See [`LmCut`].
 
-mod contexts;
+pub(crate) mod contexts;
 
 use alloc::borrow::Cow;
 use alloc::collections::BinaryHeap;
@@ -186,6 +186,13 @@ impl LmCut<'static> {
     }
 }
 
+impl LmCut<'static> {
+    /// `h_LM-cut` owning `relaxation`, without context splitting.
+    pub(crate) fn unsplit(relaxation: Relaxation) -> Self {
+        Self::from_cow(Cow::Owned(relaxation))
+    }
+}
+
 impl<'r> LmCut<'r> {
     /// Builds `h_LM-cut` over a shared `relaxation`, without context splitting.
     #[must_use]
@@ -227,6 +234,25 @@ impl<'r> LmCut<'r> {
         debug_assert!(!self.exact || total >= h_max, "LM-cut dominates h_max");
 
         Some(total.max(h_max))
+    }
+
+    /// `h_max` of `state` with `costs` (one per operator of the relaxation) instead of the
+    /// operator costs; `None` if a goal fact is unreached. Used by [`crate::AdditiveHMax`].
+    pub(crate) fn h_max_under(&mut self, state: &State, costs: &[u64]) -> Option<u64> {
+        if self.relaxation.goal_facts().is_empty() {
+            return Some(0);
+        }
+
+        self.work.remaining.clear();
+        self.work.remaining.extend_from_slice(costs);
+        let goal = self.hmax(state)?;
+
+        Some(self.work.hmax[goal])
+    }
+
+    /// The operator costs of the relaxation.
+    pub(crate) fn costs(&self) -> &[u64] {
+        &self.costs
     }
 
     /// Whether the estimate is the plain cut sum: no conditional effect is left in the

@@ -10,11 +10,11 @@ use sas_plus::{Effect, Fact, OpId, Operator, Task, VarId};
 
 /// A task whose operators are the context copies of another task's operators.
 #[derive(Clone, Debug)]
-pub(super) struct Split {
+pub(crate) struct Split {
     /// The compiled task: same variables, axioms, initial state and goal.
-    pub(super) task: Task,
+    pub(crate) task: Task,
     /// For each operator of [`Split::task`], the operator of the original task it copies.
-    pub(super) op_of: Vec<OpId>,
+    pub(crate) op_of: Vec<OpId>,
 }
 
 /// One option for a context variable: a value its effect conditions mention, or none of
@@ -30,7 +30,7 @@ type Choice = Option<u32>;
 /// Every application of an operator is an application of the copy for its state's context,
 /// with the same effects, so the compiled task has every plan of the original; the
 /// "any other" copies only add options. `None` if `task` has no conditional effects.
-pub(super) fn split(task: &Task, max_contexts: usize) -> Option<Split> {
+pub(crate) fn split(task: &Task, max_contexts: usize) -> Option<Split> {
     let conditional = |op: &Operator| op.eff.iter().any(|e| !e.conditions.is_empty());
     if !task.operators.iter().any(conditional) {
         return None;

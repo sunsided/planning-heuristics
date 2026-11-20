@@ -173,3 +173,33 @@ fn close_axioms(task: &Task, reached: &mut Vec<Fact>) {
         }
     }
 }
+
+/// Whether applying the operators of `ops`, in any order and as often as they apply, under the
+/// delete relaxation from `state` (axioms closed, derived defaults free) reaches the goal.
+pub fn relaxed_closure_reaches_goal(task: &Task, state: &State, ops: &[OpId]) -> bool {
+    let mut reached: Vec<Fact> = start_facts(task, state).collect();
+    close_axioms(task, &mut reached);
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for &op in ops {
+            let operator = &task.operators[op];
+            if !operator.pre.iter().all(|f| reached.contains(f)) {
+                continue;
+            }
+
+            let fired: Vec<Fact> = operator
+                .eff
+                .iter()
+                .filter(|e| e.conditions.iter().all(|f| reached.contains(f)))
+                .map(|e| e.fact)
+                .filter(|f| !reached.contains(f))
+                .collect();
+            changed |= !fired.is_empty();
+            reached.extend(fired);
+            close_axioms(task, &mut reached);
+        }
+    }
+
+    task.goal.iter().all(|f| reached.contains(f))
+}
