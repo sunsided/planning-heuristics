@@ -11,7 +11,8 @@ Heuristics for classical planning: red-black, FF, landmark and abstraction heuri
 
 ## Status
 
-Pre-release. Version 0.0.0 reserves the name; the API is not started yet and will change.
+Pre-release, version 0.0.0. Implemented: `h_max`, `h_add` and `h_FF` with relaxed plan
+extraction over `sas_plus::Task`. The API will change; see [docs/design.md](docs/design.md).
 
 ## License
 
