@@ -8,6 +8,7 @@ mod fixtures;
 mod hm;
 mod landmarks;
 mod lm_cut;
+mod lm_cut_seeded;
 #[cfg(feature = "lp")]
 mod operator_counting;
 mod oracle;

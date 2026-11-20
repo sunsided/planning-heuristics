@@ -19,7 +19,8 @@ Heuristics for classical planning: red-black, FF, landmark and abstraction heuri
   LP (feature `lp`)
 - LAMA-style landmark tracking along the search path (`PathHeuristic`, `LandmarkTracker`),
   inadmissible count or admissible uniform cost partitioning
-- LM-cut (`h_LM-cut`), admissible, with axioms, and conditional effects by context splitting
+- LM-cut (`h_LM-cut`), admissible, with axioms, and conditional effects by context splitting;
+  also from seeded start costs per fact and per-call operator costs (`LmCut::value_seeded`)
 - Abstraction heuristics: any `sas_plus::Abstraction`, pattern databases over
   `sas_plus::Projection`, and (optional features) merge-and-shrink and saturated cost
   partitioning

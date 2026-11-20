@@ -539,6 +539,14 @@ the scaling of the indexed closure is not measured here.
    costs over effect rules; `LmCut::new` splits conditional operators by context (at most 64
    copies each, `src/lm_cut/contexts.rs`), so the cut sum dominates `h_max`; the
    `max(sum, h_max)` fallback remains for larger operators and shared relaxations.
+   Seeded evaluation (`LmCut::value_seeded`, `LmCut::h_max_seeded`): start costs per fact
+   instead of a state, and optional per-call operator costs, on the prebuilt relaxation.
+   Each seeded fact is an artificial operator from a start fact with the seed as its cost,
+   chargeable by cuts, so seeds add up per fact used; the bound is the cheapest seeded
+   completion `min_s Σ_v seed(s[v]) + h*(s)`. State seeds (`LmCut::seed_state`) reproduce
+   `LmCut::value` exactly (the state facts' zero-cost seed operators never enter a cut).
+   Tests: equality on every reachable state of random tasks, `<=` a brute-force completion
+   with random seeds and costs. Bench: 6-9x faster than rebuilding task and `LmCut` per call.
 5. Landmarks: `h^1` and RHW landmarks, disjunctive landmarks, reasonable orderings, landmark
    count, uniform and optimal (LP, feature `lp`) cost partitioning, path-dependent tracking
    (`PathHeuristic`, `LandmarkTracker`), **done**.
