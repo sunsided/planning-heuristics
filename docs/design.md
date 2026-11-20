@@ -31,14 +31,13 @@ impl<S, C, H: Heuristic<S, C> + ?Sized> Heuristic<S, C> for Box<H> { /* forwards
 pub fn heuristic_fn<S, C, F: FnMut(&S) -> Option<C>>(f: F) -> HeuristicFn<F>;
 ```
 
-Exactly as heuristic-search `draft/initial` (60d01f4), except that the cost parameter defaults
-to `u32` here. `&mut self` lets a heuristic reuse working memory without interior
+`search_core::Heuristic` (search-core d7eb2c0), re-exported; it matched heuristic-search
+`draft/initial` (60d01f4) when it was local here. `&mut self` lets a heuristic reuse working memory without interior
 mutability; searches take the heuristic by value, and `&mut h` keeps it with its workspace.
 A blanket impl for closures would overlap with the `&mut H` impl (`&mut F` is itself
 `FnMut`, E0119), so closures go through `heuristic_fn`.
 
-Same shape and semantics as `heuristic_search::Heuristic<S, C>` (draft branch): `Option<C>`,
-`None` only when no goal is reachable, `u32` as default cost. Rules for cost types:
+Semantics: `Option<C>`, `None` only when no goal is reachable, `u32` as default cost. Rules for cost types:
 
 - Every heuristic here computes in `u64` internally (operator costs are `u32` in sas-plus,
   sums can exceed `u32`). Sums saturate at `u64::MAX`; reachability is tracked separately, so a
@@ -49,10 +48,11 @@ Same shape and semantics as `heuristic_search::Heuristic<S, C>` (draft branch): 
   `value(&State) -> Option<u64>`.
 - A future float estimate over integer costs rounds up (`ceil`), as agreed with heuristic-search.
 
-Plan: define the trait locally for now. Once `heuristic-search` is published (or a `search-core`
-crate exists because two crates need the trait), depend on it behind a default feature and
-re-export its trait instead of this one. The signatures are identical, so heuristics only change
-their `impl` path. Not done now to avoid depending on an unpublished draft.
+Done: the trait, `heuristic_fn` and `HeuristicFn` are `search-core`'s (a path dependency on
+its unreleased 0.0.0), re-exported from the crate root; the local definitions are gone. The
+signatures are identical, so the heuristics only changed their `impl` path. The dependency is
+unconditional rather than behind a default feature: the crate has no use without the trait.
+`search_core::Zero` is not re-exported (no heuristic here needs it).
 
 ## Delete relaxation (milestone 1)
 
@@ -226,9 +226,15 @@ variable is black and `h_RB > h_FF` on some states.
 - `AbstractionHeuristic<A: sas_plus::Abstraction>`: goal distances under given costs (a cost
   partition's share or `Task::costs`), looked up per state; `projection(task, pattern)` builds a
   pattern database. `None` for abstract dead ends and pruned states.
-- Feature `merge-and-shrink`: `impl Heuristic<State> for MergeAndShrinkHeuristic` (legal while
-  the trait is local; becomes an orphan at milestone 7, then switch to a wrapper or the shared
-  trait's closure impl). Build with `prune: false` for arbitrary states.
+- `GoalDistance` (`value(&self, &State) -> Option<u64>`) and `Adapter<H: GoalDistance>`, which
+  implements `Heuristic<State>` by forwarding and saturating at `u32::MAX`. Since milestone 7
+  the trait is foreign, so `impl Heuristic<State> for MergeAndShrinkHeuristic` would be an
+  orphan (E0117); the local `GoalDistance` impls are legal. A `heuristic_fn` closure would also
+  work but has an unnameable type. The clean fix is for merge-and-shrink and cost-partition to
+  implement `search_core::Heuristic` themselves; `Adapter` stays useful for any other
+  `value`-style heuristic.
+- Feature `merge-and-shrink`: `GoalDistance for MergeAndShrinkHeuristic`. Build with
+  `prune: false` for arbitrary states.
 - Feature `cost-partition`: the same for `CostPartitionedHeuristic` and `MaxOverOrders`.
 - Both are path dependencies on unreleased versions (merge-and-shrink 0.3.0, cost-partition
   0.2.0) and must be published before this crate.
@@ -278,8 +284,11 @@ regression). It can switch only after it grounds to `sas_plus::Task` (roadmap op
   free derived defaults (see Testing); both go away when it switches to this crate.
 - **sas-plus**: none required. Nice to have: DTGs (red-black builds its own),
   indexed axiom evaluation (would replace the `close_axioms` rescans here).
-- **heuristic-search**: publish the `Heuristic<S, C>` trait (or extract `search-core`), then this
-  crate re-exports it.
+- **search-core**: publish 0.1; this crate re-exports its `Heuristic` and depends on it by
+  path until then. Its MIGRATION.md calls this crate's switch 1:1, which misses the orphan
+  rule for the feature adapters (see Adapters).
+- **merge-and-shrink**, **cost-partition**: implement `search_core::Heuristic` directly, so
+  the `Adapter` wrapping becomes optional.
 - **merge-and-shrink**: publish 0.3.0 (`MergeAndShrinkHeuristic::value`); the
   `merge-and-shrink` feature uses it as a path dependency until then.
 - **cost-partition**: publish 0.2.0 (`MaxOverOrders`) for the `cost-partition` feature; an LP
@@ -415,7 +424,7 @@ the scaling of the indexed closure is not measured here.
 5. Landmarks: `h^1` landmarks, landmark count and uniform cost partitioning **done** (per
    state); optimal partitioning and path-dependent tracking open.
 6. Adapters: abstraction heuristics, `merge-and-shrink`, `cost-partition` features, **done**.
-7. Switch to the shared trait from `heuristic-search` / `search-core`.
+7. Switch to the shared trait from `search-core`, **done** (feature adapters via `Adapter`).
 
 ## References
 

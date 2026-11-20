@@ -14,7 +14,8 @@
 //!   [`UniformLandmarkCost`] (admissible, uniform cost partitioning).
 //! - [`AbstractionHeuristic`]: goal distances of any [`sas_plus::Abstraction`], such as a
 //!   pattern database over a [`sas_plus::Projection`]. Features `merge-and-shrink` and
-//!   `cost-partition` implement [`Heuristic`] for those crates' heuristics.
+//!   `cost-partition` implement [`GoalDistance`] for those crates' heuristics, which
+//!   [`Adapter`] turns into a [`Heuristic`].
 //!
 //! ## Planned
 //!
@@ -61,80 +62,20 @@
 
 extern crate alloc;
 
-use alloc::boxed::Box;
-
 mod abstraction;
 mod delete_relaxation;
 mod landmarks;
 mod red_black;
 mod relaxation;
 
-pub use abstraction::AbstractionHeuristic;
+pub use abstraction::{AbstractionHeuristic, Adapter, GoalDistance};
 pub use delete_relaxation::{HAdd, HFf, HMax};
 pub use landmarks::{LandmarkCount, LandmarkGraph, UniformLandmarkCost};
 pub use red_black::{Painting, PaintingError, RedBlack, RedBlackPlan};
 pub use relaxation::{Combine, Exploration, Relaxation, RelaxedPlan};
-
-/// An estimate of the cost from a state of type `S` to the nearest goal, in cost type `C`.
-///
-/// Same signature and semantics as `heuristic_search::Heuristic` (its `draft/initial`), so that a later shared
-/// trait (in `heuristic-search` or `search-core`) can replace this one without changing
-/// behaviour. `estimate` takes `&mut self` so a heuristic can reuse working memory without
-/// interior mutability; share the read-only part (such as a [`Relaxation`]) by reference and
-/// create one heuristic per thread.
-///
-/// Integer costs are the default. A heuristic computed over a wider integer type saturates
-/// when it is narrowed (an estimate never wraps around), and a float estimate over integer
-/// costs rounds up (`ceil`), which keeps admissibility.
-///
-/// Implemented for `&mut H` and `Box<H>` of any heuristic `H` (so `Box<dyn Heuristic<S, C>>`
-/// works), and for closures through [`heuristic_fn`]. A blanket impl for closures cannot
-/// coexist with the one for `&mut H`, because `&mut F` is itself a closure.
-pub trait Heuristic<S, C = u32> {
-    /// Estimates the remaining cost from `state` to a goal.
-    ///
-    /// `None` means no goal is reachable from `state` (a proven dead end). Searches drop such
-    /// states, so `None` is only returned when that is certain.
-    fn estimate(&mut self, state: &S) -> Option<C>;
-}
-
-impl<S, C, H: Heuristic<S, C> + ?Sized> Heuristic<S, C> for &mut H {
-    fn estimate(&mut self, state: &S) -> Option<C> {
-        (**self).estimate(state)
-    }
-}
-
-impl<S, C, H: Heuristic<S, C> + ?Sized> Heuristic<S, C> for Box<H> {
-    fn estimate(&mut self, state: &S) -> Option<C> {
-        (**self).estimate(state)
-    }
-}
-
-/// Turns a closure `FnMut(&S) -> Option<C>` into a [`Heuristic`].
-///
-/// # Examples
-///
-/// ```
-/// use planning_heuristics::{Heuristic, heuristic_fn};
-///
-/// let mut h = heuristic_fn(|n: &u32| 10_u32.checked_sub(*n));
-///
-/// assert_eq!(h.estimate(&3), Some(7));
-/// assert_eq!(h.estimate(&12), None);
-/// ```
-pub fn heuristic_fn<S, C, F: FnMut(&S) -> Option<C>>(f: F) -> HeuristicFn<F> {
-    HeuristicFn(f)
-}
-
-/// A closure used as a [`Heuristic`]; created by [`heuristic_fn`].
-#[derive(Debug, Clone, Copy)]
-pub struct HeuristicFn<F>(F);
-
-impl<S, C, F: FnMut(&S) -> Option<C>> Heuristic<S, C> for HeuristicFn<F> {
-    fn estimate(&mut self, state: &S) -> Option<C> {
-        (self.0)(state)
-    }
-}
+// The shared trait of the planning crates: `planning_heuristics::Heuristic` and
+// `search_core::Heuristic` are one trait. A doc comment here would be prepended to all three.
+pub use search_core::{Heuristic, HeuristicFn, heuristic_fn};
 
 /// Compile-time check: the shared tables are `Sync`, the per-thread heuristics are `Send`.
 const _: () = {

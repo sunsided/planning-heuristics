@@ -15,13 +15,27 @@ Heuristics for classical planning: red-black, FF, landmark and abstraction heuri
 Not yet: LM-cut, optimal (LP) landmark cost partitioning, LAMA-style landmark tracking along
 the search path, preferred operators.
 
+The `Heuristic` trait, `heuristic_fn` and `HeuristicFn` are
+[search-core](https://github.com/sunsided/search-core)'s, re-exported from the crate root, so
+these heuristics plug into every search crate built on it.
+
 ## Features
 
-- `merge-and-shrink`: `Heuristic` for `merge_and_shrink::MergeAndShrinkHeuristic`.
-- `cost-partition`: `Heuristic` for `cost_partition::CostPartitionedHeuristic` and
+- `merge-and-shrink`: `GoalDistance` for `merge_and_shrink::MergeAndShrinkHeuristic`; wrap it
+  in `Adapter` to get a `Heuristic`.
+- `cost-partition`: the same for `cost_partition::CostPartitionedHeuristic` and
   `MaxOverOrders`.
 
-Both depend on unreleased versions of those crates (path dependencies for now).
+Both depend on unreleased versions of those crates (path dependencies for now), as does
+search-core.
+
+## Breaking changes
+
+- `Heuristic`, `heuristic_fn` and `HeuristicFn` are now `search_core`'s (identical signatures;
+  existing `use planning_heuristics::Heuristic` paths keep working).
+- The feature-gated heuristics of merge-and-shrink and cost-partition no longer implement
+  `Heuristic` directly (the orphan rule forbids it for a foreign trait). Wrap them:
+  `Adapter(builder.build(&task)).estimate(&state)`. Values are unchanged.
 
 ## Status
 

@@ -18,6 +18,8 @@ merge-and-shrink = ["dep:merge-and-shrink"]
 cost-partition = ["dep:cost-partition"]
 
 [dependencies]
+# Unreleased: the shared Heuristic trait (see docs/design.md).
+search-core = { path = "../search-core", version = "0.0.0" }
 sas-plus = { version = "0.2.1", default-features = false }
 # Unreleased: MergeAndShrinkHeuristic::value needs 0.3.0 (see docs/design.md).
 merge-and-shrink = { path = "../merge-and-shrink", version = "0.3.0", default-features = false, optional = true }

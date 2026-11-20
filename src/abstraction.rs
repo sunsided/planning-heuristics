@@ -2,7 +2,8 @@
 //!
 //! [`AbstractionHeuristic`] covers any [`sas_plus::Abstraction`], such as a
 //! [`sas_plus::Projection`] (a pattern database). With the `merge-and-shrink` and
-//! `cost-partition` features, the heuristics of those crates implement [`Heuristic`] directly.
+//! `cost-partition` features, the heuristics of those crates implement [`GoalDistance`] and
+//! become a [`Heuristic`] through [`Adapter`].
 
 use alloc::vec::Vec;
 
@@ -113,31 +114,76 @@ fn saturate(value: u64) -> u32 {
     u32::try_from(value).unwrap_or(u32::MAX)
 }
 
-/// The final merge-and-shrink abstraction's goal distances as a [`Heuristic`].
+/// A heuristic of another crate with an inherent `value(&State) -> Option<u64>`, which
+/// [`Adapter`] turns into a [`Heuristic`].
+///
+/// [`Heuristic`] is the shared `search_core` trait, so the orphan rule forbids implementing it
+/// here for another crate's type; this local trait plus [`Adapter`] stands in for that impl.
+/// Implemented, behind the matching features, for `merge_and_shrink::MergeAndShrinkHeuristic`
+/// (`merge-and-shrink`) and for `cost_partition::CostPartitionedHeuristic` and
+/// `cost_partition::MaxOverOrders` (`cost-partition`).
+pub trait GoalDistance {
+    /// The estimated cost from `state` to a goal; `None` for a proven dead end (or, for an
+    /// abstraction that prunes, a state it found unreachable).
+    fn value(&self, state: &State) -> Option<u64>;
+}
+
+/// A [`GoalDistance`] used as a [`Heuristic`]: forwards to [`GoalDistance::value`] and
+/// saturates at [`u32::MAX`], like every heuristic of this crate.
+///
+/// # Examples
+///
+/// ```
+/// use planning_heuristics::{Adapter, GoalDistance, Heuristic};
+/// use sas_plus::State;
+///
+/// /// A stand-in for an external heuristic: the first variable's value, as a distance.
+/// struct FirstValue;
+///
+/// impl GoalDistance for FirstValue {
+///     fn value(&self, state: &State) -> Option<u64> {
+///         state.0.first().map(|&v| v as u64)
+///     }
+/// }
+///
+/// let mut h = Adapter(FirstValue);
+/// assert_eq!(h.estimate(&State(vec![4])), Some(4));
+/// assert_eq!(h.estimate(&State(vec![])), None);
+/// ```
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct Adapter<H>(pub H);
+
+impl<H: GoalDistance> Heuristic<State> for Adapter<H> {
+    fn estimate(&mut self, state: &State) -> Option<u32> {
+        self.0.value(state).map(saturate)
+    }
+}
+
+/// The final merge-and-shrink abstraction's goal distances.
 ///
 /// Admissible. `None` means a dead end or, when built with `prune: true`, a state the
 /// construction found unreachable from the initial state; build with `prune: false` to
 /// evaluate arbitrary states.
 #[cfg(feature = "merge-and-shrink")]
-impl Heuristic<State> for merge_and_shrink::MergeAndShrinkHeuristic {
-    fn estimate(&mut self, state: &State) -> Option<u32> {
-        self.value(state).map(saturate)
+impl GoalDistance for merge_and_shrink::MergeAndShrinkHeuristic {
+    fn value(&self, state: &State) -> Option<u64> {
+        self.value(state)
     }
 }
 
-/// A saturated cost partitioning over abstractions as a [`Heuristic`]: the sum of their goal
-/// distances under their cost shares. Admissible.
+/// A saturated cost partitioning over abstractions: the sum of their goal distances under
+/// their cost shares. Admissible.
 #[cfg(feature = "cost-partition")]
-impl<A: Abstraction> Heuristic<State> for cost_partition::CostPartitionedHeuristic<'_, A> {
-    fn estimate(&mut self, state: &State) -> Option<u32> {
-        self.value(state).map(saturate)
+impl<A: Abstraction> GoalDistance for cost_partition::CostPartitionedHeuristic<'_, A> {
+    fn value(&self, state: &State) -> Option<u64> {
+        self.value(state)
     }
 }
 
-/// The maximum over several saturated cost partitionings as a [`Heuristic`]. Admissible.
+/// The maximum over several saturated cost partitionings. Admissible.
 #[cfg(feature = "cost-partition")]
-impl<A: Abstraction> Heuristic<State> for cost_partition::MaxOverOrders<'_, A> {
-    fn estimate(&mut self, state: &State) -> Option<u32> {
-        self.value(state).map(saturate)
+impl<A: Abstraction> GoalDistance for cost_partition::MaxOverOrders<'_, A> {
+    fn value(&self, state: &State) -> Option<u64> {
+        self.value(state)
     }
 }

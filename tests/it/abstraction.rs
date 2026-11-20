@@ -1,6 +1,8 @@
 //! Abstraction heuristics against `h*`: pattern databases, and with the optional features
 //! merge-and-shrink and saturated cost partitioning.
 
+#[cfg(any(feature = "merge-and-shrink", feature = "cost-partition"))]
+use planning_heuristics::Adapter;
 use planning_heuristics::{AbstractionHeuristic, Heuristic};
 use sas_plus::random::{RandomTaskParams, random_task};
 use sas_plus::{State, Task};
@@ -15,6 +17,16 @@ fn state_variables(task: &Task) -> Vec<usize> {
     (0..task.num_variables())
         .filter(|&v| !task.variables[v].is_derived())
         .collect()
+}
+
+/// Checks that an [`Adapter`]'s `estimate` is the wrapped heuristic's own `raw` value,
+/// saturated at `u32::MAX`, and returns it widened for [`check_admissible`].
+#[cfg(any(feature = "merge-and-shrink", feature = "cost-partition"))]
+fn adapted(estimate: Option<u32>, raw: Option<u64>) -> Option<u64> {
+    let saturated = raw.map(|v| u32::try_from(v).unwrap_or(u32::MAX));
+    assert_eq!(estimate, saturated, "adapter changed the value");
+
+    estimate.map(u64::from)
 }
 
 /// Checks that `value` never exceeds `h*` and never reports a dead end that is not one on
@@ -110,9 +122,9 @@ fn merge_and_shrink_is_admissible() {
             );
             builder.prune = false;
             builder.max_states = 8;
-            let mut h = builder.build(&task);
+            let mut h = Adapter(builder.build(&task));
             check_admissible(&format!("{label}, seed {seed}"), &task, false, |s| {
-                h.estimate(s).map(u64::from)
+                adapted(h.estimate(s), h.0.value(s))
             });
         }
     }
@@ -138,13 +150,17 @@ fn saturated_cost_partitioning_is_admissible() {
             let backward: Vec<usize> = forward.iter().rev().copied().collect();
             let costs = task.costs();
 
-            let mut scp = saturated_cost_partitioning(&projections, &forward, &costs);
+            let mut scp = Adapter(saturated_cost_partitioning(&projections, &forward, &costs));
             check_admissible(&format!("{label}, seed {seed}"), &task, false, |s| {
-                scp.estimate(s).map(u64::from)
+                adapted(scp.estimate(s), scp.0.value(s))
             });
-            let mut max = MaxOverOrders::new(&projections, &[forward, backward], &costs);
+            let mut max = Adapter(MaxOverOrders::new(
+                &projections,
+                &[forward, backward],
+                &costs,
+            ));
             check_admissible(&format!("{label}, seed {seed}, max"), &task, false, |s| {
-                max.estimate(s).map(u64::from)
+                adapted(max.estimate(s), max.0.value(s))
             });
         }
     }
