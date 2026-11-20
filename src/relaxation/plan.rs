@@ -102,10 +102,16 @@ impl Relaxation {
     /// heads were closed, appending an operator to `workspace.plan` whenever its rule's head is
     /// not true yet. Returns the plan cost.
     fn replay(&self, state: &State, ws: &mut Workspace) -> u64 {
-        self.relaxed_state(state, ws);
+        let start_facts = self.relaxed_state(state, ws);
+        debug_assert!(
+            ws.order[..start_facts]
+                .iter()
+                .all(|&f| ws.facts[f as usize].supporter(ws.epoch).is_none()),
+            "the exploration closes the start facts first, without supporters"
+        );
         ws.plan.clear();
         let mut cost = 0_u64;
-        for i in 0..ws.order.len() {
+        for i in start_facts..ws.order.len() {
             let fact = ws.order[i] as usize;
             let Some(r) = ws.facts[fact]
                 .supporter(ws.epoch)
@@ -138,14 +144,18 @@ impl Relaxation {
     ///
     /// One pass over the axioms fires those the start facts enable; [`Relaxation::close_axioms`]
     /// then follows only the facts this adds, so axiom chains cost no further passes.
-    fn relaxed_state(&self, state: &State, ws: &mut Workspace) {
+    ///
+    /// Returns the number of distinct start facts. The exploration closes exactly these first,
+    /// so they lead `workspace.order`, and the replay skips them: none has a supporter.
+    fn relaxed_state(&self, state: &State, ws: &mut Workspace) -> usize {
         ws.reached.reset(self.num_facts, ws.epoch);
+        let mut start_facts = 0;
         for fact in self.start_facts(state) {
-            ws.reached.insert(fact as usize);
+            start_facts += usize::from(ws.reached.insert(fact as usize));
         }
 
         if !self.has_axioms() {
-            return;
+            return start_facts;
         }
 
         ws.stack.clear();
@@ -154,6 +164,8 @@ impl Relaxation {
         }
 
         self.close_axioms(ws);
+
+        start_facts
     }
 
     /// Whether the task has axioms; without them the replay skips the axiom closure.
