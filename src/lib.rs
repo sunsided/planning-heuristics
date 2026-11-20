@@ -12,6 +12,8 @@
 //! - [`Relaxation::landmarks`]: `h^1` fact landmarks with natural orderings
 //!   ([`LandmarkGraph`]), and the heuristics [`LandmarkCount`] (inadmissible) and
 //!   [`UniformLandmarkCost`] (admissible, uniform cost partitioning).
+//! - [`LmCut`]: the landmark-cut heuristic `h_LM-cut` (Helmert & Domshlak 2009), admissible,
+//!   with its disjunctive [`ActionLandmark`]s.
 //! - [`AbstractionHeuristic`]: goal distances of any [`sas_plus::Abstraction`], such as a
 //!   pattern database over a [`sas_plus::Projection`]. Features `merge-and-shrink` and
 //!   `cost-partition` implement [`GoalDistance`] for those crates' heuristics, which
@@ -19,7 +21,7 @@
 //!
 //! ## Planned
 //!
-//! - LM-cut, optimal landmark cost partitioning, landmark tracking along the search path
+//! - Optimal landmark cost partitioning, landmark tracking along the search path
 //! - Preferred operators
 //!
 //! See `docs/design.md` in the repository for the design and the milestones.
@@ -65,12 +67,14 @@ extern crate alloc;
 mod abstraction;
 mod delete_relaxation;
 mod landmarks;
+mod lm_cut;
 mod red_black;
 mod relaxation;
 
 pub use abstraction::{AbstractionHeuristic, Adapter, GoalDistance};
 pub use delete_relaxation::{HAdd, HFf, HMax};
 pub use landmarks::{LandmarkCount, LandmarkGraph, UniformLandmarkCost};
+pub use lm_cut::{ActionLandmark, LmCut};
 pub use red_black::{Painting, PaintingError, RedBlack, RedBlackPlan};
 pub use relaxation::{Combine, Exploration, Relaxation, RelaxedPlan};
 // The shared trait of the planning crates: `planning_heuristics::Heuristic` and
@@ -90,5 +94,6 @@ const _: () = {
     send::<LandmarkCount<'static>>();
     send::<UniformLandmarkCost<'static>>();
     send::<RedBlack<'static>>();
+    send::<LmCut<'static>>();
     send::<AbstractionHeuristic<sas_plus::Projection>>();
 };

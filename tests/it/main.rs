@@ -6,6 +6,7 @@ mod check;
 mod examples;
 mod fixtures;
 mod landmarks;
+mod lm_cut;
 mod oracle;
 mod random;
 mod red_black;

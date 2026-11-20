@@ -8,11 +8,12 @@ Heuristics for classical planning: red-black, FF, landmark and abstraction heuri
 - Red-black heuristic `h_RB` by relaxed plan repair, with a greedy or explicit painting
 - `h^1` fact landmarks with natural orderings; landmark count (inadmissible) and uniform
   landmark cost partitioning (admissible)
+- LM-cut (`h_LM-cut`), admissible, with conditional effects and axioms
 - Abstraction heuristics: any `sas_plus::Abstraction`, pattern databases over
   `sas_plus::Projection`, and (optional features) merge-and-shrink and saturated cost
   partitioning
 
-Not yet: LM-cut, optimal (LP) landmark cost partitioning, LAMA-style landmark tracking along
+Not yet: optimal (LP) landmark cost partitioning, LAMA-style landmark tracking along
 the search path, preferred operators.
 
 The `Heuristic` trait, `heuristic_fn` and `HeuristicFn` are

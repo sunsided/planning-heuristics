@@ -420,7 +420,8 @@ the scaling of the indexed closure is not measured here.
    the plan replay done. Open: preferred operators, incremental evaluation hooks. Then propose the
    width-search switch.
 3. Red-black `h_RB` (greedy painting, plan repair), **done**.
-4. LM-cut. Open.
+4. LM-cut, **done** (`src/lm_cut.rs`): `h_max` from scratch per round, operator-level
+   costs over effect rules, `max(sum, h_max)` with conditional effects.
 5. Landmarks: `h^1` landmarks, landmark count and uniform cost partitioning **done** (per
    state); optimal partitioning and path-dependent tracking open.
 6. Adapters: abstraction heuristics, `merge-and-shrink`, `cost-partition` features, **done**.
