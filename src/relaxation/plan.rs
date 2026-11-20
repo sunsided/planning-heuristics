@@ -101,8 +101,12 @@ impl Relaxation {
     /// Replays the marked operator rules from `state` under the relaxation, in the order their
     /// heads were closed, appending an operator to `workspace.plan` whenever its rule's head is
     /// not true yet. Returns the plan cost.
+    ///
+    /// Starts after the start facts in `workspace.order`: none has a supporter, so none can
+    /// add an operator.
     fn replay(&self, state: &State, ws: &mut Workspace) -> u64 {
-        let start_facts = self.relaxed_state(state, ws);
+        self.relaxed_state(state, ws);
+        let start_facts = ws.start_facts;
         debug_assert!(
             ws.order[..start_facts]
                 .iter()
@@ -111,8 +115,10 @@ impl Relaxation {
         );
         ws.plan.clear();
         let mut cost = 0_u64;
-        for i in start_facts..ws.order.len() {
-            let fact = ws.order[i] as usize;
+        // Taken out so the loop can borrow it while the replay mutates the workspace.
+        let order = core::mem::take(&mut ws.order);
+        for &fact in &order[start_facts..] {
+            let fact = fact as usize;
             let Some(r) = ws.facts[fact]
                 .supporter(ws.epoch)
                 .filter(|&r| ws.marked.contains(r))
@@ -136,6 +142,8 @@ impl Relaxation {
             cost = cost.saturating_add(rule.cost);
         }
 
+        ws.order = order;
+
         cost
     }
 
@@ -144,18 +152,14 @@ impl Relaxation {
     ///
     /// One pass over the axioms fires those the start facts enable; [`Relaxation::close_axioms`]
     /// then follows only the facts this adds, so axiom chains cost no further passes.
-    ///
-    /// Returns the number of distinct start facts. The exploration closes exactly these first,
-    /// so they lead `workspace.order`, and the replay skips them: none has a supporter.
-    fn relaxed_state(&self, state: &State, ws: &mut Workspace) -> usize {
+    fn relaxed_state(&self, state: &State, ws: &mut Workspace) {
         ws.reached.reset(self.num_facts, ws.epoch);
-        let mut start_facts = 0;
         for fact in self.start_facts(state) {
-            start_facts += usize::from(ws.reached.insert(fact as usize));
+            ws.reached.insert(fact as usize);
         }
 
         if !self.has_axioms() {
-            return start_facts;
+            return;
         }
 
         ws.stack.clear();
@@ -164,8 +168,6 @@ impl Relaxation {
         }
 
         self.close_axioms(ws);
-
-        start_facts
     }
 
     /// Whether the task has axioms; without them the replay skips the axiom closure.

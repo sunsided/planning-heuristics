@@ -165,6 +165,9 @@ pub(crate) struct Workspace {
     pub(super) queue: Queue,
     /// Closed facts in closing order.
     pub(super) order: Vec<u32>,
+    /// Number of start facts (state facts and free facts) leading [`Workspace::order`]; they
+    /// are closed at cost 0 without a supporter before any rule fires.
+    pub(super) start_facts: usize,
     /// The best-supporter rules the goal depends on.
     pub(super) marked: Marks,
     /// The facts visited while marking supporters.

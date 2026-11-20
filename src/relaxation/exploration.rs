@@ -177,6 +177,7 @@ impl<'a, const ADD: bool> Run<'a, ADD> {
             self.close_at_zero(fact);
         }
 
+        self.ws.start_facts = self.ws.order.len();
         let (facts, epoch) = (&self.ws.facts, self.ws.epoch);
         self.open_goals = relaxation
             .goal
