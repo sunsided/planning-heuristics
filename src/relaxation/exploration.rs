@@ -144,7 +144,11 @@ impl<'a> Run<'a> {
             cost: vec![None; n],
             supporter: vec![None; n],
             closed: vec![false; n],
-            unsatisfied: relaxation.rules.iter().map(|r| r.conditions.len()).collect(),
+            unsatisfied: relaxation
+                .rules
+                .iter()
+                .map(|r| r.conditions.len())
+                .collect(),
             accumulated: vec![0; relaxation.rules.len()],
             heap: BinaryHeap::new(),
             order: Vec::new(),
@@ -155,7 +159,10 @@ impl<'a> Run<'a> {
     /// without conditions offer its head.
     fn seed(&mut self, state: &State) {
         let relaxation = self.relaxation;
-        for fact in relaxation.state_facts(state).chain(relaxation.free.iter().copied()) {
+        for fact in relaxation
+            .state_facts(state)
+            .chain(relaxation.free.iter().copied())
+        {
             self.offer(fact, 0, None);
         }
 

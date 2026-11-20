@@ -102,7 +102,10 @@ impl Relaxation {
             }
 
             self.apply_relaxed(op, &mut reached);
-            debug_assert!(reached[rule.head], "a marked rule fires once its conditions hold");
+            debug_assert!(
+                reached[rule.head],
+                "a marked rule fires once its conditions hold"
+            );
             ops.push(op);
             cost = cost.saturating_add(rule.cost);
         }

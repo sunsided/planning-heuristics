@@ -71,11 +71,7 @@ impl Relaxation {
     #[must_use]
     pub fn new(task: &Task) -> Self {
         let offsets = fact_offsets(task);
-        let num_facts = task
-            .variables
-            .iter()
-            .map(|v| v.domain_size as usize)
-            .sum();
+        let num_facts = task.variables.iter().map(|v| v.domain_size as usize).sum();
         let id = |f: &Fact| offsets[f.var] + f.value as usize;
 
         let (mut rules, op_rules) = operator_rules(task, &id);
