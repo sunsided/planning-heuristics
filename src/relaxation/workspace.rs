@@ -169,7 +169,8 @@ pub(crate) struct Workspace {
     pub(super) marked: Marks,
     /// The facts visited while marking supporters.
     pub(super) seen: Marks,
-    /// Facts still to visit while marking supporters.
+    /// Facts still to visit while marking supporters; during plan replay, the reached facts
+    /// whose axiom watchers are still to be checked.
     pub(super) stack: Vec<usize>,
     /// Facts true in the relaxed state during plan replay.
     pub(super) reached: Marks,

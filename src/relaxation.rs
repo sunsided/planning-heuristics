@@ -44,6 +44,14 @@ pub struct Relaxation {
     watcher_starts: Vec<usize>,
     /// The concatenated watcher lists of all facts; see [`Relaxation::watcher_starts`].
     watcher_rules: Vec<u32>,
+    /// The axioms that have fact `f` as a condition are
+    /// `axiom_watcher_axioms[axiom_watcher_starts[f]..axiom_watcher_starts[f + 1]]`, as
+    /// indices relative to [`Relaxation::first_axiom`]. Indexes the axiom closure of the
+    /// relaxed plan replay; kept apart from [`Relaxation::watcher_rules`] so a fact without
+    /// axiom watchers costs one range lookup.
+    axiom_watcher_starts: Vec<usize>,
+    /// The concatenated axiom watcher lists; see [`Relaxation::axiom_watcher_starts`].
+    axiom_watcher_axioms: Vec<u32>,
     /// The worklist state of each rule before any condition is closed, with its head and
     /// cost packed alongside the counters for the inner loop; copied into the workspace in
     /// one go per evaluation.
@@ -115,6 +123,8 @@ impl Relaxation {
         }
 
         let (watcher_starts, watcher_rules) = watchers(&rules, num_facts);
+        let (axiom_watcher_starts, axiom_watcher_axioms) =
+            watchers(&rules[first_axiom..], num_facts);
         let (rule_init, unconditioned) = worklist_tables(&rules);
 
         Self {
@@ -123,6 +133,8 @@ impl Relaxation {
             rules,
             watcher_starts,
             watcher_rules,
+            axiom_watcher_starts,
+            axiom_watcher_axioms,
             rule_init,
             fact_init: alloc::vec![FactSlot::UNREACHED; num_facts],
             unconditioned,
@@ -169,9 +181,11 @@ impl Relaxation {
         &self.watcher_rules[self.watcher_starts[fact]..self.watcher_starts[fact + 1]]
     }
 
-    /// The axiom rules, in task order.
-    fn axiom_rules(&self) -> &[Rule] {
-        &self.rules[self.first_axiom..]
+    /// The axioms that have `fact` as a condition, as indices relative to
+    /// [`Relaxation::first_axiom`], ascending.
+    fn axiom_watchers(&self, fact: usize) -> &[u32] {
+        &self.axiom_watcher_axioms
+            [self.axiom_watcher_starts[fact]..self.axiom_watcher_starts[fact + 1]]
     }
 }
 

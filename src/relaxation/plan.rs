@@ -16,8 +16,7 @@ use alloc::vec::Vec;
 
 use sas_plus::{OpId, State};
 
-use super::workspace::Marks;
-use super::{Combine, Relaxation, Workspace};
+use super::{Combine, Relaxation, Rule, Workspace};
 
 /// A relaxed plan: operators that reach the goal when deletes are ignored.
 ///
@@ -136,13 +135,30 @@ impl Relaxation {
 
     /// Sets `workspace.reached` to the facts of `state` plus the free facts, closed under the
     /// axioms.
+    ///
+    /// One pass over the axioms fires those the start facts enable; [`Relaxation::close_axioms`]
+    /// then follows only the facts this adds, so axiom chains cost no further passes.
     fn relaxed_state(&self, state: &State, ws: &mut Workspace) {
         ws.reached.reset(self.num_facts, ws.epoch);
         for fact in self.start_facts(state) {
             ws.reached.insert(fact as usize);
         }
 
-        self.close_axioms(&mut ws.reached);
+        if !self.has_axioms() {
+            return;
+        }
+
+        ws.stack.clear();
+        for rule in &self.rules[self.first_axiom..] {
+            fire_if_enabled(rule, ws);
+        }
+
+        self.close_axioms(ws);
+    }
+
+    /// Whether the task has axioms; without them the replay skips the axiom closure.
+    fn has_axioms(&self) -> bool {
+        self.first_axiom < self.rules.len()
     }
 
     /// Adds every effect of `op` whose conditions hold in `workspace.reached`, then closes
@@ -159,25 +175,33 @@ impl Relaxation {
             ws.reached.insert(head);
         }
 
-        self.close_axioms(&mut ws.reached);
+        if self.has_axioms() {
+            ws.stack.extend_from_slice(&ws.fired);
+            self.close_axioms(ws);
+        }
     }
 
-    /// Fires axioms whose conditions hold until none adds a fact.
+    /// Re-evaluates the axioms watching each reached fact on `workspace.stack`, firing
+    /// those whose conditions now all hold, until no axiom adds a fact.
     ///
-    /// shortcut: rescans all axioms per pass, `O(axioms²)` worst case per call; switch to
-    /// condition counters once axiom-heavy tasks matter.
-    fn close_axioms(&self, reached: &mut Marks) {
-        let mut changed = true;
-        while changed {
-            changed = false;
-            for rule in self.axiom_rules() {
-                if !reached.contains(rule.head)
-                    && rule.conditions.iter().all(|&c| reached.contains(c))
-                {
-                    reached.insert(rule.head);
-                    changed = true;
-                }
+    /// An axiom can only become enabled when its last missing condition is reached, so
+    /// checking the watchers of each new fact finds every axiom that fires: a replay step
+    /// costs the axioms that depend on the facts it added, not a pass over all axioms.
+    fn close_axioms(&self, ws: &mut Workspace) {
+        while let Some(fact) = ws.stack.pop() {
+            for &a in self.axiom_watchers(fact) {
+                fire_if_enabled(&self.rules[self.first_axiom + a as usize], ws);
             }
         }
+    }
+}
+
+/// Fires the axiom `rule` if its head is not reached yet and all its conditions are: adds
+/// the head to `workspace.reached` and queues it on `workspace.stack`.
+#[inline]
+fn fire_if_enabled(rule: &Rule, ws: &mut Workspace) {
+    if !ws.reached.contains(rule.head) && rule.conditions.iter().all(|&c| ws.reached.contains(c)) {
+        ws.reached.insert(rule.head);
+        ws.stack.push(rule.head);
     }
 }

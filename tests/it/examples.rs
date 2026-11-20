@@ -117,6 +117,42 @@ fn derived_default_is_free() {
     check_task("derived-default", &task);
 }
 
+/// An axiom that enables another axiom during plan replay: `op 0` sets `v0`, which derives
+/// `d1`, which with `v0` derives `d2`, the precondition of `op 1`. The dependent axiom is
+/// listed first, so a single pass over the axioms in task order would miss `d2`.
+#[test]
+fn axiom_chain_fires_during_replay() {
+    let mut task = binary_task(
+        4,
+        vec![
+            op(vec![Effect::new(Fact::new(0, 1))], 1),
+            Operator {
+                pre: vec![Fact::new(2, 1)],
+                ..op(vec![Effect::new(Fact::new(3, 1))], 1)
+            },
+        ],
+        vec![Fact::new(3, 1)],
+    );
+    task.variables[1].axiom_layer = Some(0);
+    task.variables[2].axiom_layer = Some(1);
+    task.axioms.push(Axiom {
+        conditions: vec![Fact::new(1, 1), Fact::new(0, 1)],
+        head: Fact::new(2, 1),
+    });
+    task.axioms.push(Axiom {
+        conditions: vec![Fact::new(0, 1)],
+        head: Fact::new(1, 1),
+    });
+    let state = task.initial_state();
+    assert_eq!(state.0, [0, 0, 0, 0]);
+
+    assert_eq!(HMax::new(&task).value(&state), Some(2));
+    let plan = HFf::new(&task).relaxation().relaxed_plan(&state).unwrap();
+    assert_eq!(plan.ops(), [0, 1]);
+    assert_eq!(plan.cost(), 2);
+    check_task("axiom-chain", &task);
+}
+
 /// A satisfied goal costs nothing and needs an empty relaxed plan.
 #[test]
 fn goal_state_has_empty_plan() {
