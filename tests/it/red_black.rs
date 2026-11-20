@@ -4,7 +4,8 @@
 use std::collections::BTreeSet;
 
 use planning_heuristics::{
-    CausalLevel, Fragment, HFf, Painting, PaintingError, RedBlack, RedBlackOptions, Relaxation,
+    CausalLevel, Fragment, HFf, HMax, Painting, PaintingError, RedBlack, RedBlackOptions,
+    Relaxation,
 };
 use sas_plus::random::{RandomTaskParams, random_task};
 use sas_plus::{Axiom, Effect, Fact, OpId, Operator, State, Task, Variable};
@@ -207,9 +208,28 @@ fn assert_each_matters(above: [usize; STRATEGIES.len()]) {
 }
 
 /// The [`RedBlackOptions`] every painting is checked with, by label.
-const VARIANTS: [(&str, RedBlackOptions); 2] = [
-    ("repair", RedBlackOptions { forward: false }),
-    ("forward", RedBlackOptions { forward: true }),
+const VARIANTS: [(&str, RedBlackOptions); 3] = [
+    (
+        "repair",
+        RedBlackOptions {
+            forward: false,
+            follow: false,
+        },
+    ),
+    (
+        "forward",
+        RedBlackOptions {
+            forward: true,
+            follow: false,
+        },
+    ),
+    (
+        "follow",
+        RedBlackOptions {
+            forward: false,
+            follow: true,
+        },
+    ),
 ];
 
 /// Checks `h_RB` with `painting` under every entry of [`VARIANTS`]; returns the number of
@@ -243,6 +263,7 @@ fn check_variant(
 ) -> usize {
     let relaxation = Relaxation::new(task);
     let mut h_ff = HFf::with_relaxation(&relaxation);
+    let mut h_max = HMax::with_relaxation(&relaxation);
     let mut h_rb = RedBlack::with_relaxation(task, &relaxation, painting).with_options(options);
     let mut all_red = RedBlack::with_relaxation(task, &relaxation, &Painting::all_red());
     let black = h_rb.black_variables().to_vec();
@@ -259,9 +280,15 @@ fn check_variant(
         };
 
         assert_eq!(h_rb.value(state), Some(plan.cost()), "{}", ctx());
+        // Following need not contain the relaxed plan; any red-black plan is a relaxed plan.
+        let bound = if options.follow {
+            h_max.value(state).expect("not a dead end")
+        } else {
+            ff
+        };
         assert!(
-            plan.cost() >= ff,
-            "h_RB {} < h_FF {ff}, {}",
+            plan.cost() >= bound,
+            "h_RB {} < {bound}, {}",
             plan.cost(),
             ctx()
         );
@@ -636,4 +663,75 @@ fn conditional_side_effects_do_not_invert() {
         .plan(&task.initial_state())
         .unwrap();
     assert!(!plan.is_repaired());
+}
+
+/// A small `StarShapeLogistics` (Domshlak, Hoffmann & Katz 2015, Example 7): a truck (0) at the
+/// centre (value 0) with spokes 1 and 2, a hand (1, 1 = free) holding one package at a time,
+/// and packages 2 and 3 (0 = centre, 1 / 2 = spoke, 3 = in the truck) to bring to spokes 1
+/// and 2. With truck and hand black, red facts following finds the optimal real plan (7);
+/// the repair of the same relaxed plan over-estimates.
+#[test]
+fn red_facts_following_on_star_shape_logistics() {
+    let step = |pre: Vec<Fact>, eff: Vec<Fact>| op(pre, eff.into_iter().map(Effect::new).collect());
+    let (truck, hand) = (0, 1);
+    let mut operators = Vec::new();
+    for spoke in 1..3 {
+        operators.push(step(
+            vec![Fact::new(truck, 0)],
+            vec![Fact::new(truck, spoke)],
+        ));
+        operators.push(step(
+            vec![Fact::new(truck, spoke)],
+            vec![Fact::new(truck, 0)],
+        ));
+    }
+
+    for package in 2..4 {
+        for at in 0..3 {
+            let (loc, pos) = (Fact::new(truck, at), Fact::new(package, at));
+            let held = Fact::new(package, 3);
+            operators.push(step(
+                vec![loc, pos, Fact::new(hand, 1)],
+                vec![held, Fact::new(hand, 0)],
+            ));
+            operators.push(step(
+                vec![loc, held, Fact::new(hand, 0)],
+                vec![pos, Fact::new(hand, 1)],
+            ));
+        }
+    }
+
+    let task = Task {
+        variables: vec![
+            Variable::new("truck", 3),
+            Variable::new("hand", 2),
+            Variable::new("A", 4),
+            Variable::new("B", 4),
+        ],
+        operators,
+        initial: State(vec![0, 1, 0, 0]),
+        goal: vec![Fact::new(2, 1), Fact::new(3, 2)],
+        axioms: vec![],
+    };
+    let state = task.initial_state();
+    let painting = Painting::dag(&task, vec![truck, hand]).unwrap();
+    let follow = RedBlackOptions {
+        follow: true,
+        ..RedBlackOptions::default()
+    };
+    let plan = RedBlack::with_painting(&task, &painting)
+        .with_options(follow)
+        .plan(&state)
+        .unwrap();
+    let repaired = RedBlack::with_painting(&task, &painting)
+        .value(&state)
+        .unwrap();
+
+    assert!(plan.is_repaired());
+    assert_eq!(plan.cost(), 7);
+    assert!(plan.is_plan_for(&task, &state));
+    assert!(
+        repaired > 7,
+        "the repair follows the relaxed plan's order: {repaired}"
+    );
 }

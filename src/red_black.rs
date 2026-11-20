@@ -28,8 +28,9 @@ pub struct RedBlackPlan {
     ops: Vec<OpId>,
     /// Sum of the operator costs; this is `h_RB`.
     cost: u64,
-    /// Whether the repair succeeded. If not, `ops` is the relaxed plan, which in general does
-    /// not reach the goal under red-black semantics, and `cost` is `h_FF`.
+    /// Whether a red-black plan was found (by repair or by red facts following). If not, `ops`
+    /// is the relaxed plan, which in general does not reach the goal under red-black
+    /// semantics, and `cost` is `h_FF`.
     repaired: bool,
 }
 
@@ -40,8 +41,16 @@ pub struct RedBlackOptions {
     /// Relaxed plan forwarding (option F of Katz, Hoffmann & Domshlak, AAAI 2013): before the
     /// repair, move every operator without black effects as early in the relaxed plan as it
     /// can go, so its red effects do not wait behind black moves. The repaired plan still
-    /// contains the relaxed plan, so `h_RB >= h_FF` still holds.
+    /// contains the relaxed plan, so `h_RB >= h_FF` still holds. Ignored with
+    /// [`RedBlackOptions::follow`].
     pub forward: bool,
+    /// Red facts following (`h^RB_follow` of Domshlak, Hoffmann & Katz 2015, Section 5.2)
+    /// instead of relaxed plan repair: only the red facts the relaxed plan needs (`R+`) are
+    /// targets, achieved in any order by any operators, which avoids much of the repair's
+    /// over-estimation. Its plan need not contain the relaxed plan, so `h_RB < h_FF` is
+    /// possible; it is a relaxed plan, so `h_RB >= h+` still holds. In the tractable fragment
+    /// it always succeeds (their Theorem 13), up to the operator budget of DAG paintings.
+    pub follow: bool,
 }
 
 impl RedBlackPlan {
@@ -102,7 +111,9 @@ impl RedBlackPlan {
 /// with RSE-invertible black variables a path always exists (Domshlak, Hoffmann & Katz 2015,
 /// Corollary 1 and Theorem 11), so the fallback only happens outside that fragment or at the
 /// operator budget of a DAG painting. The repaired plan contains the relaxed plan, so
-/// `h_RB >= h_FF` always, with equality when every variable is red. Dead ends are exactly those
+/// `h_RB >= h_FF` always, with equality when every variable is red. With
+/// [`RedBlackOptions::follow`], red facts following replaces the repair (and `h_RB >= h_FF`
+/// no longer holds, only `h_RB >= h+`). Dead ends are exactly those
 /// of `h_FF` (no relaxed plan means no red-black plan). Not admissible.
 ///
 /// ```mermaid
@@ -234,7 +245,11 @@ impl<'r> RedBlack<'r> {
     /// #     variables: vec![], operators: vec![], initial: sas_plus::State(vec![]),
     /// #     goal: vec![], axioms: vec![],
     /// # };
-    /// let h_rb = RedBlack::new(&task).with_options(RedBlackOptions { forward: true });
+    /// let options = RedBlackOptions {
+    ///     forward: true,
+    ///     ..RedBlackOptions::default()
+    /// };
+    /// let h_rb = RedBlack::new(&task).with_options(options);
     /// assert!(h_rb.options().forward);
     /// ```
     #[must_use]
@@ -293,13 +308,17 @@ impl<'r> RedBlack<'r> {
             .relaxation
             .relaxed_plan_in(state, &mut self.workspace)?;
         self.relaxed.clone_from(&self.workspace.plan);
-        if self.options.forward {
+        if self.options.forward && !self.options.follow {
             forward::forward(&self.tables, &mut self.relaxed);
         }
 
-        let repaired = self
-            .repair
-            .run(&self.relaxation, &self.tables, state, &self.relaxed);
+        let repaired = if self.options.follow {
+            self.repair
+                .follow(&self.relaxation, &self.tables, state, &self.relaxed)
+        } else {
+            self.repair
+                .run(&self.relaxation, &self.tables, state, &self.relaxed)
+        };
 
         Some(repaired.map_or((ff, false), |cost| (cost, true)))
     }

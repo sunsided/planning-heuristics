@@ -1,5 +1,7 @@
 //! Relaxed plan repair under red-black semantics.
 
+mod follow;
+
 use alloc::vec::Vec;
 
 use sas_plus::{OpId, State};
@@ -15,10 +17,11 @@ pub(super) struct Repair {
     holds: Vec<bool>,
     /// The current value of each black variable.
     black: Vec<u32>,
-    /// Whether each fact was ever true in this repair; read for black facts only (red facts
-    /// never become false, so for them this is [`Repair::holds`]). The black part of the
-    /// set `F` of Domshlak, Hoffmann & Katz (2015, Figure 4).
-    visited: Vec<bool>,
+    /// The black values moves may use when black variables are linked; read for black facts
+    /// only. In relaxed plan repair the values visited so far, the black part of the set `F`
+    /// of Domshlak, Hoffmann & Katz (2015, Figure 4); in red facts following the achievable
+    /// values `B` of their Figure 6 (a superset of the visited ones).
+    allowed: Vec<bool>,
     /// The red-black plan so far.
     pub plan: Vec<OpId>,
     /// Its cost so far.
@@ -39,6 +42,8 @@ pub(super) struct Repair {
     /// Most operators one repair may apply while black variables are linked; moving one may
     /// recursively move its causal-graph ancestors, which can blow up.
     budget: usize,
+    /// Buffers of red facts following.
+    following: follow::Buffers,
 }
 
 impl Repair {
@@ -52,7 +57,7 @@ impl Repair {
         relaxed_plan: &[OpId],
     ) -> Option<u64> {
         self.start(relaxation, tables, state);
-        self.budget = 1024 + 64 * relaxed_plan.len();
+        self.budget = budget(relaxed_plan);
         for &op in relaxed_plan {
             self.satisfy_black_pre(relaxation, tables, op, None)?;
             if !tables.red_pre[op].iter().all(|&f| self.holds[f]) {
@@ -62,6 +67,12 @@ impl Repair {
             self.apply(relaxation, tables, op);
         }
 
+        self.finish(relaxation, tables)
+    }
+
+    /// Moves the black variables to their goal values, descendants first; returns the plan
+    /// cost if the whole goal then holds.
+    fn finish(&mut self, relaxation: &Relaxation, tables: &Tables) -> Option<u64> {
         for &(b, value) in &tables.black_goal {
             self.move_black(relaxation, tables, b, value)?;
         }
@@ -101,7 +112,7 @@ impl Repair {
                 .zip(&tables.domain)
                 .map(|(&offset, &n)| value_of(&self.holds, offset, n)),
         );
-        self.visited.clone_from(&self.holds);
+        self.allowed.clone_from(&self.holds);
         self.plan.clear();
         self.cost = 0;
         self.steps = 0;
@@ -148,7 +159,7 @@ impl Repair {
             let offset = tables.black_offsets[b];
             self.holds[offset + self.black[b] as usize] = false;
             self.holds[offset + value as usize] = true;
-            self.visited[offset + value as usize] = true;
+            self.allowed[offset + value as usize] = true;
             self.black[b] = value;
         }
 
@@ -213,8 +224,7 @@ impl Repair {
     /// Domains are small, so the open value is found by a linear scan.
     ///
     /// With linked black variables only transitions of the projected task `Π^B` count: the
-    /// black preconditions and the value reached must have been visited
-    /// ([`Repair::usable_in_dag`]). Without links there are no black outside conditions and
+    /// black preconditions and the value reached must be allowed ([`Repair::usable_in_dag`]). Without links there are no black outside conditions and
     /// any value may be reached, as in Katz, Hoffmann & Domshlak (AAAI 2013).
     fn cheapest_paths(&mut self, tables: &Tables, b: usize) {
         let n = tables.domain[b] as usize;
@@ -242,15 +252,15 @@ impl Repair {
 
     /// Whether transition `t` of black variable `b` belongs to the projected task `Π^B` of
     /// Domshlak, Hoffmann & Katz (2015, Figure 4): its black preconditions and the value it
-    /// reaches were visited. With RSE-invertible black variables this keeps every
+    /// reaches are allowed ([`Repair::allowed`]). With RSE-invertible black variables this keeps every
     /// precondition an ancestor is asked for reachable (their Theorem 11).
     fn usable_in_dag(&self, tables: &Tables, b: usize, t: &Transition) -> bool {
         let fact = |b: usize, value: u32| tables.black_offsets[b] + value as usize;
 
-        self.visited[fact(b, t.to)]
+        self.allowed[fact(b, t.to)]
             && tables.black_pre[t.op]
                 .iter()
-                .all(|&(c, value)| self.visited[fact(c, value)])
+                .all(|&(c, value)| self.allowed[fact(c, value)])
     }
 
     /// The value with the smallest distance that is not final yet.
@@ -261,6 +271,12 @@ impl Repair {
             .min()
             .map(|(_, x)| x)
     }
+}
+
+/// The operator budget of one repair or following run from `relaxed_plan`, for linked black
+/// variables only (explicit plans can be exponentially long there).
+fn budget(relaxed_plan: &[OpId]) -> usize {
+    1024 + 64 * relaxed_plan.len()
 }
 
 /// The value of the variable whose value 0 has fact id `offset` and whose domain has `n`

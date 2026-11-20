@@ -53,6 +53,16 @@ pub(super) struct Tables {
     /// `None` if one is on a derived variable (axioms may achieve it, so relaxed plan
     /// forwarding never moves the operator).
     pub needs: Vec<Option<Vec<usize>>>,
+    /// The black variables (by index) in topological order of the black causal graph, roots
+    /// first (by ascending level, stable).
+    pub topological: Vec<usize>,
+    /// For each black variable with domain size `n`, the cheapest cost from value `x` to
+    /// value `y` at `x * n + y` over its domain transition graph, ignoring all conditions on
+    /// other variables; `None` if `y` is unreachable from `x`.
+    pub distance: Vec<Vec<Option<u64>>>,
+    /// For each black variable, the fact ids of every value of each red variable an operator
+    /// moving it sets: the red facts its moves may delete under real semantics.
+    pub side_facts: Vec<Vec<usize>>,
 }
 
 impl Tables {
@@ -101,6 +111,13 @@ impl Tables {
             .collect();
         let (mut black_goal, red_goal) = split(&task.goal);
         by_level(&mut black_goal);
+        let mut topological: Vec<usize> = (0..black.len()).collect();
+        topological.sort_by_key(|&b| level[b]);
+        let transitions = transitions(task, black);
+        let side_facts = transitions
+            .iter()
+            .map(|ts| side_facts(task, relaxation, black, ts))
+            .collect();
 
         Self {
             is_black_fact,
@@ -112,7 +129,14 @@ impl Tables {
             black_eff,
             red_pre,
             cost: task.operators.iter().map(|op| u64::from(op.cost)).collect(),
-            transitions: transitions(task, black),
+            distance: black
+                .iter()
+                .zip(&transitions)
+                .map(|(&v, ts)| distances(task, v, ts))
+                .collect(),
+            transitions,
+            topological,
+            side_facts,
             domain: black
                 .iter()
                 .map(|&v| task.variables[v].domain_size)
@@ -150,6 +174,67 @@ fn needs(task: &Task, relaxation: &Relaxation, op: &sas_plus::Operator) -> Optio
     ids.dedup();
 
     Some(ids)
+}
+
+/// The fact ids of every value of each red variable (not in `black`) that an operator of
+/// `transitions` sets.
+fn side_facts(
+    task: &Task,
+    relaxation: &Relaxation,
+    black: &[VarId],
+    transitions: &[Transition],
+) -> Vec<usize> {
+    let mut vars: Vec<VarId> = transitions
+        .iter()
+        .flat_map(|t| &task.operators[t.op].eff)
+        .map(|e| e.fact.var)
+        .filter(|v| black.binary_search(v).is_err())
+        .collect();
+    vars.sort_unstable();
+    vars.dedup();
+
+    vars.iter()
+        .flat_map(|&v| {
+            (0..task.variables[v].domain_size)
+                .map(move |value| relaxation.fact_id(Fact::new(v, value)))
+        })
+        .collect()
+}
+
+/// All-pairs cheapest costs over the domain transition graph of `var` with `transitions`,
+/// ignoring outside conditions (Floyd–Warshall; domains are small); see
+/// [`Tables::distance`].
+fn distances(task: &Task, var: VarId, transitions: &[Transition]) -> Vec<Option<u64>> {
+    let n = task.variables[var].domain_size as usize;
+    let mut d: Vec<Option<u64>> = alloc::vec![None; n * n];
+    for x in 0..n {
+        d[x * n + x] = Some(0);
+    }
+
+    for t in transitions {
+        let cost = u64::from(task.operators[t.op].cost);
+        let to = t.to as usize;
+        let sources = t.from.map_or(0..n, |f| f as usize..f as usize + 1);
+        for x in sources.filter(|&x| x != to) {
+            let slot = &mut d[x * n + to];
+            *slot = Some(slot.map_or(cost, |old| old.min(cost)));
+        }
+    }
+
+    for k in 0..n {
+        for x in 0..n {
+            let Some(xk) = d[x * n + k] else { continue };
+            for y in 0..n {
+                if let Some(ky) = d[k * n + y] {
+                    let via = xk.saturating_add(ky);
+                    let slot = &mut d[x * n + y];
+                    *slot = Some(slot.map_or(via, |old| old.min(via)));
+                }
+            }
+        }
+    }
+
+    d
 }
 
 /// For each black variable, the operators that set it, with the value they require.
