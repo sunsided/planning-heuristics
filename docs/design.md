@@ -226,7 +226,8 @@ C). All three were checked against the PDFs.
 | Arcless black causal graph + RSE-invertible: plan generation polynomial (AAAI Cor. 2) | `Painting::new`, Dijkstra per black variable | matches |
 | Acyclic black causal graph + RSE-invertible: plan generation polynomial under succinct plans (AAAI Thm. 2, AIJ Thm. 11) | `Painting::dag`, explicit plans with a budget | deliberate deviation: explicit plans like the papers' implementation; budget guards exponential length |
 | Causal graph arcs include effect-effect pairs, so a black-acyclic operator changes one black variable | `sas_plus::CausalGraph` | matches |
-| RSE-invertible arc: an inverse arc with `ocon' ⊆ ocon ∪ oeff`; unconditioned operators induce arcs from every value | `painting/invertible.rs` | matches; only unconditional effects count |
+| RSE-invertible arc: an inverse arc with `ocon' ⊆ ocon ∪ oeff`; unconditioned operators induce arcs from every value | `painting/invertible.rs` | matches; only unconditional effects count in `oeff` (bug fixed, 4e4c441: conditional side effects were accepted, so a variable that could not move back was painted black; regression test `conditional_side_effects_do_not_invert`) |
+| Strong connectivity of each `Π^B` DTG (restricted to `F`) follows from RSE-invertibility (AIJ Thm. 11 (ii), Lemma 1) | no separate test | bug fixed (411526e): candidates used to need a strongly connected whole DTG, ignoring outside conditions, which neither implies nor is implied by the fragment; replaced by the RSE-invertibility test |
 | Repair main loop: insert `ACHIEVE(pre(a_i)[V^B])` before each relaxed plan action, `ACHIEVE(G[V^B])` at the end (AIJ Fig. 4) | `Repair::run` | matches |
 | `Π^B` actions need `pre(a) ⊆ F` and black effect in `F` (visited facts) (AIJ Fig. 4) | `Repair::usable_in_dag` (DAG paintings) | bug fixed (80f486e): the DAG repair searched the whole DTG, asked ancestors for unvisited values and fell back to `h_FF` inside the fragment; regression test `dag_repair_stays_on_visited_values` |
 | Arcless case: Dijkstra over DTG arcs whose red outside conditions hold (AAAI, Implementation) | `Repair::cheapest_paths` without the `F` restriction | matches the AAAI text; deliberate deviation from AIJ Fig. 4's `D(v) ∩ F`: the unrestricted search only finds shorter paths, still valid |
@@ -237,12 +238,13 @@ C). All three were checked against the PDFs.
 | L: paint red the highest causal graph level (closest to leaves) | `causal_graph_level(.., Top, ..)`, longest path from a source in the condensed causal graph, ties to the higher variable id | deliberate deviation: Fast Downward's cg-heuristic level is not available; for translator output the variable id follows that order |
 | L̄: lowest level first | `CausalLevel::Bottom` | matches (same level proxy) |
 | A: most incident arcs to black variables, ties smaller domain, then L | `incident_arcs` (each direction counts) | matches |
-| C: fewest conflicts (relaxed plan actions whose precondition on `v` is violated with only `v` black), ties L | `conflict_directed` | matches; the papers do not say what the value is after a violation: we assume it moved there, as the repair does. Was "inspired by" (counted goals, painted greedily black): replaced |
+| C: fewest conflicts (relaxed plan actions whose precondition on `v` is violated with only `v` black), ties L | `conflict_directed` | matches; the papers do not say what the value is after a violation: we assume it moved there, as the repair does. Previously approximated (counted goals, painted greedily black): replaced |
 | C uses the relaxed plan of the initial state | any `state` argument; dead end gives zero conflicts | deliberate generalisation |
 | Theorem 14: red leaves do not change `h^RB*` | applied by the three paper strategies only | greedy paintings may keep leaves black (harmless) |
 
 Tests (for every strategy in both fragments): `h_RB >= h_FF`, same dead ends, `all_red` equals
-`h_FF`, every repair succeeds, every repaired plan valid under an independent red-black
+`h_FF`, every repair succeeds (and, for an out-of-fragment DAG painting, a failed repair
+costs exactly `h_FF`), every repaired plan valid under an independent red-black
 simulator with matching cost, and every strategy raises `h_RB` above `h_FF` somewhere. Unit
 tests check RSE-invertibility on the SimpleGrid hand variable and the Figure 8 maximality
 post-process on a StarShapeLogistics-like task.
