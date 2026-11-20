@@ -3,11 +3,219 @@
 //! the black causal graph is in the fragment, then repaint black whatever fits again.
 
 use alloc::vec::Vec;
+use core::cmp::Reverse;
 
-use sas_plus::{CausalGraph, Task, VarId};
+use sas_plus::{CausalGraph, State, Task, VarId};
 
 use super::invertible::is_rse_invertible;
-use super::{Fragment, cycle_arc, ineligible, linked};
+use super::{CausalLevel, Fragment, cycle_arc, ineligible, levels, linked, max_by_key};
+use crate::Relaxation;
+
+/// The choice point of the painting algorithm of Domshlak, Hoffmann & Katz (2015, Figure 8):
+/// which black variable to paint red next. Every strategy stops at a maximal painting for its
+/// [`Fragment`]; see [`super::Painting::with_strategy`].
+///
+/// Ties are broken as in the paper: A, its inverse and `Mixed` by smaller domain, then by L;
+/// C, its inverse and `SampledConflicts` by L. L itself breaks ties by variable id (see
+/// [`super::Painting::causal_graph_level`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Strategy {
+    /// L (with [`CausalLevel::Top`]): paint red the variable with the highest causal graph
+    /// level, closest to the leaves; L̄ ([`CausalLevel::Bottom`]): the lowest.
+    Level(CausalLevel),
+    /// A: the variable with the most causal graph arcs to other black variables, so few
+    /// variables end up red.
+    MostArcs,
+    /// Ā, the inverse of A (a sanity check of the paper): the fewest arcs.
+    FewestArcs,
+    /// C: the variable with the fewest conflicts with the relaxed plan of the given state, so
+    /// the most critical variables stay black.
+    FewestConflicts,
+    /// C̄, the inverse of C (a sanity check): the most conflicts.
+    MostConflicts,
+    /// `C[N]`: like C, with the conflicts summed (equivalently, averaged) over the relaxed plans
+    /// of `samples` states sampled by random walks from the given state, which see conflicts
+    /// that only show later in a plan.
+    SampledConflicts {
+        /// The number of sampled states, `N`; the given state itself is not counted.
+        samples: usize,
+        /// The seed of the random walks.
+        seed: u64,
+    },
+    /// `CA[p]`: the variable maximising `p · Â(v) + (1 − p) · (1 − Ĉ(v))`, where `Â` and `Ĉ` are
+    /// the arc and conflict counts divided by their maxima over the black variables; `p` is
+    /// `arcs_percent / 100`. `arcs_percent = 100` is A; 0 is C with the ties of A.
+    Mixed {
+        /// The weight `p` of the arcs, in percent (at most 100).
+        arcs_percent: u8,
+    },
+    /// RND: a variable chosen uniformly at random (a sanity check).
+    Random {
+        /// The seed.
+        seed: u64,
+    },
+}
+
+/// The black variables of `task` painted with `strategy` for `fragment` (ascending); the
+/// conflict strategies use the relaxed plan of `state`.
+///
+/// # Panics
+///
+/// Panics if `state` has fewer values than the task has variables, or `Mixed` has a weight
+/// above 100.
+pub(super) fn paint_with(
+    task: &Task,
+    state: &State,
+    strategy: Strategy,
+    fragment: Fragment,
+) -> Vec<VarId> {
+    let graph = CausalGraph::new(task);
+    let level = levels(task.num_variables(), |v| graph.successors(v));
+    let domain = |v: VarId| task.variables[v].domain_size;
+    let conflicts = || match strategy {
+        Strategy::SampledConflicts { samples, seed } => {
+            sampled_conflicts(task, state, samples, seed)
+        }
+        _ => state_conflicts(task, state),
+    };
+
+    match strategy {
+        Strategy::Level(CausalLevel::Top) => paint(task, &graph, fragment, |black| {
+            max_by_key(black, |v| (level[v], v))
+        }),
+        Strategy::Level(CausalLevel::Bottom) => paint(task, &graph, fragment, |black| {
+            max_by_key(black, |v| (Reverse(level[v]), Reverse(v)))
+        }),
+        Strategy::MostArcs => paint(task, &graph, fragment, |black| {
+            let arcs = |v| incident_arcs(&graph, black, v);
+            max_by_key(black, |v| (arcs(v), Reverse(domain(v)), level[v], v))
+        }),
+        Strategy::FewestArcs => paint(task, &graph, fragment, |black| {
+            let arcs = |v| incident_arcs(&graph, black, v);
+            max_by_key(black, |v| {
+                (Reverse(arcs(v)), Reverse(domain(v)), level[v], v)
+            })
+        }),
+        Strategy::FewestConflicts | Strategy::SampledConflicts { .. } => {
+            let c = conflicts();
+            paint(task, &graph, fragment, |black| {
+                max_by_key(black, |v| (Reverse(c[v]), level[v], v))
+            })
+        }
+        Strategy::MostConflicts => {
+            let c = conflicts();
+            paint(task, &graph, fragment, |black| {
+                max_by_key(black, |v| (c[v], level[v], v))
+            })
+        }
+        Strategy::Mixed { arcs_percent } => {
+            assert!(arcs_percent <= 100, "CA[p] needs p <= 1");
+            let c = conflicts();
+            paint(task, &graph, fragment, |black| {
+                let arcs = |v| incident_arcs(&graph, black, v);
+                let weight = mixed_weight(black, arcs, &c, arcs_percent);
+                max_by_key(black, |v| (weight(v), Reverse(domain(v)), level[v], v))
+            })
+        }
+        Strategy::Random { seed } => {
+            let mut rng = SplitMix64(seed);
+            paint(task, &graph, fragment, |black| {
+                black[rng.below(black.len())]
+            })
+        }
+    }
+}
+
+/// The `CA[p]` score of each variable as an exact integer, `P(v)` scaled by
+/// `100 · max(Â) · max(Ĉ)` (each maximum at least 1, which leaves a zero count at zero).
+fn mixed_weight<'a>(
+    black: &'a [VarId],
+    arcs: impl Fn(VarId) -> usize + 'a,
+    conflicts: &'a [usize],
+    arcs_percent: u8,
+) -> impl Fn(VarId) -> u128 + 'a {
+    let wide = |x: usize| u128::try_from(x).expect("counts fit u128");
+    let max_arcs = wide(black.iter().map(|&v| arcs(v)).max().unwrap_or(0).max(1));
+    let max_conflicts = wide(
+        black
+            .iter()
+            .map(|&v| conflicts[v])
+            .max()
+            .unwrap_or(0)
+            .max(1),
+    );
+    let p = u128::from(arcs_percent);
+
+    move |v| {
+        p * wide(arcs(v)) * max_conflicts
+            + (100 - p) * (max_conflicts - wide(conflicts[v])) * max_arcs
+    }
+}
+
+/// The conflicts of the relaxed plan of `state` (all zero if it is a dead end).
+fn state_conflicts(task: &Task, state: &State) -> Vec<usize> {
+    Relaxation::new(task).relaxed_plan(state).map_or_else(
+        || alloc::vec![0; task.num_variables()],
+        |plan| conflicts(task, &state.0, plan.ops()),
+    )
+}
+
+/// The conflicts summed over the relaxed plans of `samples` states, each the end of a random
+/// walk from `state` of a length drawn uniformly from `0..=2 · |relaxed plan of state|`,
+/// stopping early in a state without applicable operators. Dead-end samples count no
+/// conflicts.
+///
+/// The paper does not say how it samples; random walks of about twice the relaxed plan
+/// length mirror how Fast Downward samples states.
+fn sampled_conflicts(task: &Task, state: &State, samples: usize, seed: u64) -> Vec<usize> {
+    let relaxation = Relaxation::new(task);
+    let depth = relaxation
+        .relaxed_plan(state)
+        .map_or(0, |plan| 2 * plan.ops().len());
+    let mut rng = SplitMix64(seed);
+    let mut total = alloc::vec![0; task.num_variables()];
+    let mut applicable = Vec::new();
+    for _ in 0..samples {
+        let mut sample = state.clone();
+        for _ in 0..rng.below(depth + 1) {
+            applicable.clear();
+            applicable.extend(task.applicable_operators(&sample));
+            if applicable.is_empty() {
+                break;
+            }
+
+            sample = task.apply(applicable[rng.below(applicable.len())], &sample);
+        }
+
+        if let Some(plan) = relaxation.relaxed_plan(&sample) {
+            for (t, c) in total.iter_mut().zip(conflicts(task, &sample.0, plan.ops())) {
+                *t += c;
+            }
+        }
+    }
+
+    total
+}
+
+/// The `SplitMix64` generator: small, seedable and good enough for sampling.
+struct SplitMix64(u64);
+
+impl SplitMix64 {
+    /// The next 64 random bits.
+    fn next(&mut self) -> u64 {
+        self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = self.0;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^ (z >> 31)
+    }
+
+    /// A value in `0..n` (`n > 0`), by multiply-shift (bias below `n / 2^64`).
+    fn below(&mut self, n: usize) -> usize {
+        let wide = u128::from(self.next()) * u128::try_from(n).expect("usize fits u128");
+        usize::try_from(wide >> 64).expect("below n")
+    }
+}
 
 /// The black variables of the Figure 8 painting of `task` for `fragment`, ascending.
 /// `select` is the choice point: given the variables still black (ascending, at least two),
@@ -105,7 +313,7 @@ mod tests {
 
     use sas_plus::{CausalGraph, Effect, Fact, Operator, State, Task, Variable};
 
-    use super::{Fragment, paint};
+    use super::{Fragment, Strategy, paint, paint_with};
 
     /// A free-hand variable (0) and three packages (1 to 3); loading or unloading a package
     /// changes both, so the hand and each package form a causal graph cycle.
@@ -156,5 +364,30 @@ mod tests {
 
         assert_eq!(black, [1, 2, 3]);
         assert_eq!(order.next(), None);
+    }
+
+    /// CA[1] is A, and a sampled C with no samples sees no conflicts, so it is L; RND is
+    /// deterministic per seed and maximal like the rest.
+    #[test]
+    fn strategy_special_cases() {
+        let task = star();
+        let state = task.initial_state();
+        for fragment in [Fragment::Arcless, Fragment::Dag] {
+            let with = |strategy| paint_with(&task, &state, strategy, fragment);
+            assert_eq!(
+                with(Strategy::Mixed { arcs_percent: 100 }),
+                with(Strategy::MostArcs)
+            );
+            assert_eq!(
+                with(Strategy::SampledConflicts {
+                    samples: 0,
+                    seed: 9
+                }),
+                with(Strategy::Level(super::CausalLevel::Top))
+            );
+            let random = with(Strategy::Random { seed: 5 });
+            assert_eq!(random, with(Strategy::Random { seed: 5 }));
+            assert_ne!(random, [] as [usize; 0]);
+        }
     }
 }

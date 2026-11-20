@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 
 use planning_heuristics::{
     CausalLevel, Fragment, HFf, HMax, Painting, PaintingError, RedBlack, RedBlackOptions,
-    Relaxation,
+    Relaxation, Strategy,
 };
 use sas_plus::random::{RandomTaskParams, random_task};
 use sas_plus::{Axiom, Effect, Fact, OpId, Operator, State, Task, Variable};
@@ -119,7 +119,7 @@ fn is_red_black_plan(task: &Task, black: &[usize], state: &State, plan: &[OpId])
 
 /// The painting strategies checked, by label; those ending in `-dag` paint an acyclic black
 /// causal graph, the others an arcless one.
-const STRATEGIES: [&str; 10] = [
+const STRATEGIES: [&str; 20] = [
     "greedy",
     "greedy-dag",
     "top",
@@ -128,8 +128,18 @@ const STRATEGIES: [&str; 10] = [
     "bottom-dag",
     "arcs",
     "arcs-dag",
+    "fewest-arcs",
+    "fewest-arcs-dag",
     "conflicts",
     "conflicts-dag",
+    "most-conflicts",
+    "most-conflicts-dag",
+    "sampled",
+    "sampled-dag",
+    "mixed",
+    "mixed-dag",
+    "random",
+    "random-dag",
 ];
 
 /// The painting of `task` by strategy `label` (see [`STRATEGIES`]).
@@ -146,7 +156,20 @@ fn paint(task: &Task, label: &str) -> Painting {
         "bottom" => Painting::causal_graph_level(task, CausalLevel::Bottom, fragment),
         "arcs" => Painting::incident_arcs(task, fragment),
         "conflicts" => Painting::conflict_directed(task, &task.initial_state(), fragment),
-        _ => unreachable!("unknown strategy {label}"),
+        other => {
+            let strategy = match other {
+                "fewest-arcs" => Strategy::FewestArcs,
+                "most-conflicts" => Strategy::MostConflicts,
+                "sampled" => Strategy::SampledConflicts {
+                    samples: 5,
+                    seed: 1,
+                },
+                "mixed" => Strategy::Mixed { arcs_percent: 50 },
+                "random" => Strategy::Random { seed: 3 },
+                _ => unreachable!("unknown strategy {label}"),
+            };
+            Painting::with_strategy(task, &task.initial_state(), strategy, fragment)
+        }
     }
 }
 

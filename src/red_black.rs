@@ -14,7 +14,7 @@ use alloc::vec::Vec;
 
 use sas_plus::{OpId, State, Task, VarId};
 
-pub use painting::{CausalLevel, Fragment, Painting, PaintingError};
+pub use painting::{CausalLevel, Fragment, Painting, PaintingError, Strategy};
 use repair::Repair;
 use tables::Tables;
 

@@ -4,13 +4,12 @@ mod invertible;
 mod strategy;
 
 use alloc::vec::Vec;
-use core::cmp::Reverse;
 use core::fmt;
 
 use sas_plus::{CausalGraph, State, Task, VarId};
 
-use crate::Relaxation;
 use invertible::is_rse_invertible;
+pub use strategy::Strategy;
 
 /// A choice of black variables for [`crate::RedBlack`]; every other variable is red.
 ///
@@ -298,14 +297,7 @@ impl Painting {
     /// ```
     #[must_use]
     pub fn causal_graph_level(task: &Task, keep: CausalLevel, fragment: Fragment) -> Self {
-        let graph = CausalGraph::new(task);
-        let level = levels(task.num_variables(), |v| graph.successors(v));
-        let black = strategy::paint(task, &graph, fragment, |black| match keep {
-            CausalLevel::Top => max_by_key(black, |v| (level[v], v)),
-            CausalLevel::Bottom => max_by_key(black, |v| (Reverse(level[v]), Reverse(v))),
-        });
-
-        Self { black }
+        Self::with_strategy(task, &task.initial_state(), Strategy::Level(keep), fragment)
     }
 
     /// The incident arcs strategy (A) of Domshlak, Hoffmann & Katz (2015, Section 6.1; also
@@ -351,15 +343,7 @@ impl Painting {
     /// ```
     #[must_use]
     pub fn incident_arcs(task: &Task, fragment: Fragment) -> Self {
-        let graph = CausalGraph::new(task);
-        let level = levels(task.num_variables(), |v| graph.successors(v));
-        let domain = |v: VarId| task.variables[v].domain_size;
-        let black = strategy::paint(task, &graph, fragment, |black| {
-            let arcs = |v| strategy::incident_arcs(&graph, black, v);
-            max_by_key(black, |v| (arcs(v), Reverse(domain(v)), level[v], v))
-        });
-
-        Self { black }
+        Self::with_strategy(task, &task.initial_state(), Strategy::MostArcs, fragment)
     }
 
     /// The conflict-directed strategy (C) of Domshlak, Hoffmann & Katz (2015, Section 6.1;
@@ -416,17 +400,56 @@ impl Painting {
     /// ```
     #[must_use]
     pub fn conflict_directed(task: &Task, state: &State, fragment: Fragment) -> Self {
-        let conflicts = Relaxation::new(task).relaxed_plan(state).map_or_else(
-            || alloc::vec![0; task.num_variables()],
-            |plan| strategy::conflicts(task, &state.0, plan.ops()),
-        );
-        let graph = CausalGraph::new(task);
-        let level = levels(task.num_variables(), |v| graph.successors(v));
-        let black = strategy::paint(task, &graph, fragment, |black| {
-            max_by_key(black, |v| (Reverse(conflicts[v]), level[v], v))
-        });
+        Self::with_strategy(task, state, Strategy::FewestConflicts, fragment)
+    }
 
-        Self { black }
+    /// The painting of `task` for `fragment` by `strategy`, following Figure 8 of Domshlak,
+    /// Hoffmann & Katz (2015) as described at [`Painting::causal_graph_level`]; the conflict
+    /// strategies use the relaxed plan of `state` (the paper: the initial state).
+    ///
+    /// # Panics
+    ///
+    /// Panics if `state` has fewer values than the task has variables, or
+    /// [`Strategy::Mixed`] has a weight above 100.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use planning_heuristics::{Fragment, Painting, Strategy};
+    /// use sas_plus::{Effect, Fact, Operator, State, Task, Variable};
+    ///
+    /// // Two switches, each needing the other off to turn on: a causal graph cycle. Every
+    /// // strategy paints exactly one of them red for a DAG.
+    /// let flip = |var: usize, from: u32, other: usize| Operator {
+    ///     name: format!("flip{var}"),
+    ///     pre: vec![Fact::new(var, from), Fact::new(other, 0)],
+    ///     eff: vec![Effect::new(Fact::new(var, 1 - from))],
+    ///     cost: 1,
+    /// };
+    /// let task = Task {
+    ///     variables: vec![Variable::new("a", 2), Variable::new("b", 2)],
+    ///     operators: vec![flip(0, 0, 1), flip(0, 1, 1), flip(1, 0, 0), flip(1, 1, 0)],
+    ///     initial: State(vec![0, 0]),
+    ///     goal: vec![Fact::new(0, 1)],
+    ///     axioms: vec![],
+    /// };
+    /// let state = task.initial_state();
+    ///
+    /// for strategy in [Strategy::FewestArcs, Strategy::Random { seed: 7 }] {
+    ///     let painting = Painting::with_strategy(&task, &state, strategy, Fragment::Dag);
+    ///     assert_eq!(painting.black().len(), 1);
+    /// }
+    /// ```
+    #[must_use]
+    pub fn with_strategy(
+        task: &Task,
+        state: &State,
+        strategy: Strategy,
+        fragment: Fragment,
+    ) -> Self {
+        Self {
+            black: strategy::paint_with(task, state, strategy, fragment),
+        }
     }
 
     /// Paints `candidates` black in order, skipping each one linked in `graph` to one painted
