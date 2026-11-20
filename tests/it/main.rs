@@ -10,4 +10,5 @@ mod lm_cut;
 mod oracle;
 mod random;
 mod red_black;
+mod rhw;
 mod width_search;

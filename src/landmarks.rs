@@ -8,6 +8,8 @@ mod heuristics;
 mod labels;
 #[cfg(feature = "lp")]
 mod optimal;
+mod ordered;
+mod rhw;
 
 use alloc::vec::Vec;
 
@@ -19,6 +21,7 @@ pub use heuristics::{LandmarkCount, UniformLandmarkCost};
 use labels::Labels;
 #[cfg(feature = "lp")]
 pub use optimal::OptimalLandmarkCost;
+pub use ordered::{LandmarkOrdering, OrderedLandmarks, OrderingKind};
 
 /// The fact landmarks of one state and their natural orderings.
 ///

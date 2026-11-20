@@ -162,6 +162,20 @@ impl Relaxation {
         (self.offsets[fact.var] + fact.value) as usize
     }
 
+    /// The fact with id `id`, the inverse of [`Relaxation::fact_id`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if `id` is not below [`Relaxation::num_facts`].
+    #[must_use]
+    pub fn fact(&self, id: usize) -> Fact {
+        assert!(id < self.num_facts, "fact id {id} out of range");
+        let id = u32::try_from(id).expect("fact ids fit u32");
+        let var = self.offsets.partition_point(|&offset| offset <= id) - 1;
+
+        Fact::new(var, id - self.offsets[var])
+    }
+
     /// The fact ids true in `state`, one per variable, in variable order.
     pub(crate) fn state_facts<'s>(
         &'s self,

@@ -76,7 +76,10 @@ pub use abstraction::{AbstractionHeuristic, Adapter, GoalDistance};
 pub use delete_relaxation::{HAdd, HFf, HMax};
 #[cfg(feature = "lp")]
 pub use landmarks::OptimalLandmarkCost;
-pub use landmarks::{LandmarkCount, LandmarkGraph, UniformLandmarkCost};
+pub use landmarks::{
+    LandmarkCount, LandmarkGraph, LandmarkOrdering, OrderedLandmarks, OrderingKind,
+    UniformLandmarkCost,
+};
 pub use lm_cut::{ActionLandmark, LmCut};
 pub use red_black::{Painting, PaintingError, RedBlack, RedBlackPlan};
 pub use relaxation::{Combine, Exploration, Relaxation, RelaxedPlan};
