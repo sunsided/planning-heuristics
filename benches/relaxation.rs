@@ -126,6 +126,8 @@ fn bench_task(criterion: &mut Criterion, name: &str, task: &Task) {
         }
     }
 
+    bench_seeded_lm_cut(&mut group, task, &states);
+
     let width = SasProblem::new(task);
     group.bench_function("width_search_h_add", |b| {
         b.iter(|| {
@@ -136,6 +138,51 @@ fn bench_task(criterion: &mut Criterion, name: &str, task: &Task) {
         });
     });
     group.finish();
+}
+
+/// Benchmarks LM-cut from seeds with per-call operator costs (here: the state's facts at 0,
+/// costs halved) two ways: rebuilding the task and `LmCut` per estimate, as a caller without
+/// `LmCut::value_seeded` must, and `value_seeded` on one prebuilt `LmCut`.
+fn bench_seeded_lm_cut(
+    group: &mut criterion::BenchmarkGroup<'_, criterion::measurement::WallTime>,
+    task: &Task,
+    states: &[State],
+) {
+    let costs: Vec<u64> = task
+        .operators
+        .iter()
+        .map(|op| u64::from(op.cost / 2))
+        .collect();
+    group.bench_function("lm_cut_rebuild", |b| {
+        b.iter(|| {
+            states
+                .iter()
+                .map(|s| {
+                    let mut rebuilt = task.clone();
+                    rebuilt.initial = s.clone();
+                    for (op, &c) in rebuilt.operators.iter_mut().zip(&costs) {
+                        op.cost = u32::try_from(c).expect("halved costs fit");
+                    }
+
+                    LmCut::new(&rebuilt).value(black_box(s))
+                })
+                .collect::<Vec<_>>()
+        });
+    });
+
+    let mut lm_cut = LmCut::new(task);
+    let mut seeds = Vec::new();
+    group.bench_function("lm_cut_seeded", |b| {
+        b.iter(|| {
+            states
+                .iter()
+                .map(|s| {
+                    lm_cut.seed_state(black_box(s), &mut seeds);
+                    lm_cut.value_seeded(&seeds, Some(&costs))
+                })
+                .collect::<Vec<_>>()
+        });
+    });
 }
 
 /// Benchmarks `heuristic` on all `states` as one iteration.
