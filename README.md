@@ -5,7 +5,8 @@ Heuristics for classical planning: red-black, FF, landmark and abstraction heuri
 ## Scope
 
 - `h_max`, `h_add` and `h_FF` with relaxed plan extraction (delete relaxation)
-- Red-black heuristic `h_RB` by relaxed plan repair, with a greedy or explicit painting
+- Red-black heuristic `h_RB` by relaxed plan repair, painted greedily, by causal graph level,
+  conflict-directed or explicitly
 - `h^1` fact landmarks with natural orderings; landmark count (inadmissible) and uniform
   landmark cost partitioning (admissible); optimal landmark cost partitioning by LP
   (feature `lp`)

@@ -8,7 +8,8 @@
 //!   `h_FF` (Bonet & Geffner 2001, Hoffmann & Nebel 2001), computed with a worklist
 //!   (generalized Dijkstra) over [`Relaxation`], which also extracts [`RelaxedPlan`]s.
 //! - [`RedBlack`]: the red-black heuristic `h_RB` by relaxed plan repair (Domshlak, Hoffmann &
-//!   Katz 2015), with the black variables chosen by a [`Painting`].
+//!   Katz 2015), with the black variables chosen by a [`Painting`]: greedy, by causal graph
+//!   level ([`CausalLevel`]) or conflict-directed.
 //! - [`Relaxation::landmarks`]: `h^1` fact landmarks with natural orderings
 //!   ([`LandmarkGraph`]), and the heuristics [`LandmarkCount`] (inadmissible) and
 //!   [`UniformLandmarkCost`] (admissible, uniform cost partitioning); with feature `lp`,
@@ -88,7 +89,7 @@ pub use landmarks::{
 };
 pub use lm_cut::{ActionLandmark, LmCut};
 pub use path::{PathHeuristic, Stateless};
-pub use red_black::{Painting, PaintingError, RedBlack, RedBlackPlan};
+pub use red_black::{CausalLevel, Painting, PaintingError, RedBlack, RedBlackPlan};
 pub use relaxation::{Combine, Exploration, Relaxation, RelaxedPlan};
 // The shared trait of the planning crates: `planning_heuristics::Heuristic` and
 // `search_core::Heuristic` are one trait. A doc comment here would be prepended to all three.

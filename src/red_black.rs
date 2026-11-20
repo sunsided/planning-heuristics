@@ -12,7 +12,7 @@ use alloc::vec::Vec;
 
 use sas_plus::{OpId, State, Task, VarId};
 
-pub use painting::{Painting, PaintingError};
+pub use painting::{CausalLevel, Painting, PaintingError};
 use repair::Repair;
 use tables::Tables;
 

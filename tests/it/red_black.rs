@@ -3,7 +3,7 @@
 
 use std::collections::BTreeSet;
 
-use planning_heuristics::{HFf, Painting, PaintingError, RedBlack, Relaxation};
+use planning_heuristics::{CausalLevel, HFf, Painting, PaintingError, RedBlack, Relaxation};
 use sas_plus::random::{RandomTaskParams, random_task};
 use sas_plus::{Axiom, Effect, Fact, OpId, Operator, State, Task, Variable};
 
@@ -117,9 +117,34 @@ fn is_red_black_plan(task: &Task, black: &[usize], state: &State, plan: &[OpId])
 /// Checks `h_RB` on every reachable state of `task`; returns the number of states where the
 /// repaired plan costs more than `h_FF`.
 fn check_red_black(name: &str, task: &Task) -> usize {
+    let paintings = [
+        ("greedy", Painting::greedy(task)),
+        ("top", Painting::causal_graph_level(task, CausalLevel::Top)),
+        (
+            "bottom",
+            Painting::causal_graph_level(task, CausalLevel::Bottom),
+        ),
+        (
+            "conflicts",
+            Painting::conflict_directed(task, &task.initial_state()),
+        ),
+    ];
+
+    paintings
+        .iter()
+        .map(|(label, painting)| {
+            Painting::new(task, painting.black().to_vec()).expect("strategies paint validly");
+            check_painting(&format!("{name}, {label}"), task, painting)
+        })
+        .sum()
+}
+
+/// Checks `h_RB` with `painting` on every reachable state of `task`; returns the number of
+/// states where the repaired plan costs more than `h_FF`.
+fn check_painting(name: &str, task: &Task, painting: &Painting) -> usize {
     let relaxation = Relaxation::new(task);
     let mut h_ff = HFf::with_relaxation(&relaxation);
-    let mut h_rb = RedBlack::with_relaxation(task, &relaxation, &Painting::greedy(task));
+    let mut h_rb = RedBlack::with_relaxation(task, &relaxation, painting);
     let mut all_red = RedBlack::with_relaxation(task, &relaxation, &Painting::all_red());
     let black = h_rb.black_variables().to_vec();
     let mut above_ff = 0;
@@ -313,4 +338,65 @@ fn two_black_variables_are_repaired_independently() {
     assert!(plan.is_repaired());
     assert_eq!(plan.cost(), 4);
     assert!(is_red_black_plan(&task, &[0, 1], &state, plan.ops()));
+}
+
+/// A truck and a package on two locations; the truck must end where it started. The truck is
+/// at the top of the causal graph, the package at the bottom, and only the truck conflicts with
+/// the relaxed plan (it must return), so the conflict-directed painting picks it and `h_RB`
+/// counts the drive back.
+#[test]
+fn painting_strategies_hand_checked() {
+    let (a, b, in_truck) = (0, 1, 2);
+    let op = |name: &str, pre: Vec<Fact>, eff: Vec<Fact>| Operator {
+        name: name.into(),
+        pre,
+        eff: eff.into_iter().map(Effect::new).collect(),
+        cost: 1,
+    };
+    let task = Task {
+        variables: vec![Variable::new("truck", 2), Variable::new("package", 3)],
+        operators: vec![
+            op("drive-a-b", vec![Fact::new(0, a)], vec![Fact::new(0, b)]),
+            op("drive-b-a", vec![Fact::new(0, b)], vec![Fact::new(0, a)]),
+            op(
+                "load-a",
+                vec![Fact::new(0, a), Fact::new(1, a)],
+                vec![Fact::new(1, in_truck)],
+            ),
+            op(
+                "load-b",
+                vec![Fact::new(0, b), Fact::new(1, b)],
+                vec![Fact::new(1, in_truck)],
+            ),
+            op(
+                "unload-a",
+                vec![Fact::new(0, a), Fact::new(1, in_truck)],
+                vec![Fact::new(1, a)],
+            ),
+            op(
+                "unload-b",
+                vec![Fact::new(0, b), Fact::new(1, in_truck)],
+                vec![Fact::new(1, b)],
+            ),
+        ],
+        initial: State(vec![a, a]),
+        goal: vec![Fact::new(1, b), Fact::new(0, a)],
+        axioms: vec![],
+    };
+    let state = task.initial_state();
+
+    assert_eq!(
+        Painting::causal_graph_level(&task, CausalLevel::Top).black(),
+        [0]
+    );
+    assert_eq!(
+        Painting::causal_graph_level(&task, CausalLevel::Bottom).black(),
+        [1]
+    );
+    let conflicts = Painting::conflict_directed(&task, &state);
+    assert_eq!(conflicts.black(), [0]);
+
+    assert_eq!(HFf::new(&task).value(&state), Some(3));
+    let mut h_rb = RedBlack::with_painting(&task, &conflicts);
+    assert_eq!(h_rb.value(&state), Some(4));
 }
