@@ -1,11 +1,16 @@
 //! Which variables are black, and the checks that keep red-black plan repair simple.
 
+mod invertible;
+mod strategy;
+
 use alloc::vec::Vec;
+use core::cmp::Reverse;
 use core::fmt;
 
 use sas_plus::{CausalGraph, State, Task, VarId};
 
 use crate::Relaxation;
+use invertible::is_rse_invertible;
 
 /// A choice of black variables for [`crate::RedBlack`]; every other variable is red.
 ///
@@ -17,20 +22,40 @@ use crate::Relaxation;
 /// lets the repair insert a path in one variable's domain transition graph at a time. An
 /// operator that changes only red variables may still require several black values; the
 /// repair moves each in turn.
+///
+/// The repair is guaranteed to succeed (never to fall back to `h_FF`) when every black
+/// variable is also RSE-invertible (see [`Painting::greedy`]): this is the tractable fragment
+/// of Katz, Hoffmann & Domshlak (AAAI 2013, Corollary 2 and Theorem 2) and Domshlak, Hoffmann
+/// & Katz (AIJ 2015, Theorem 11). [`Painting::new`] and [`Painting::dag`] do not check it; every
+/// strategy constructor paints only RSE-invertible variables.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Default)]
 pub struct Painting {
     /// The black variables, ascending.
     black: Vec<VarId>,
 }
 
-/// Which end of the causal graph [`Painting::causal_graph_level`] paints first.
+/// Which end of the causal graph [`Painting::causal_graph_level`] keeps black.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum CausalLevel {
-    /// Variables that others depend on first: the sources of the causal graph, such as the
-    /// position of a vehicle that loading and unloading operators need.
+    /// Keep the variables that others depend on black, such as the position of a vehicle
+    /// that loading and unloading operators need: paint red from the leaves up (strategy L of
+    /// Domshlak, Hoffmann & Katz 2015).
     Top,
-    /// Variables that depend on others first: the sinks, such as the positions of packages.
+    /// Keep the variables near the leaves black: paint red from the roots down (their inverse
+    /// strategy, a sanity check). The leaves themselves are always red.
     Bottom,
+}
+
+/// The tractable fragment a painting strategy targets: the shape of the causal graph induced
+/// on the black variables.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Fragment {
+    /// No arc between two black variables, as [`Painting::new`] requires (Katz, Hoffmann &
+    /// Domshlak, AAAI 2013, Corollary 2; configuration E of Domshlak, Hoffmann & Katz 2015).
+    Arcless,
+    /// An acyclic black causal graph, as [`Painting::dag`] requires (AAAI 2013, Theorem 2;
+    /// AIJ 2015, Theorem 11; configuration D).
+    Dag,
 }
 
 /// Why a set of variables cannot be painted black; see [`Painting::new`].
@@ -121,8 +146,11 @@ impl Painting {
     /// 2013). An operator then changes at most one black variable (two would link them both
     /// ways), and the repair moves a black variable's causal-graph ancestors on demand before
     /// each transition that needs them, descendants first, so a move never disturbs a value
-    /// already in place below it. Without invertible domain transition graphs that can fail or
-    /// blow up; the repair then falls back to `h_FF` (it has an operator budget).
+    /// already in place below it (Figure 7 of Domshlak, Hoffmann & Katz 2015). With
+    /// RSE-invertible black variables this always succeeds, but the plan may be exponentially
+    /// long in the number of black variables (their Proposition 2); the repair has an operator
+    /// budget and falls back to `h_FF` when it runs out, or when a variable is not invertible
+    /// and cannot move back.
     ///
     /// # Errors
     ///
@@ -182,9 +210,9 @@ impl Painting {
         }
     }
 
-    /// A greedy DAG painting: the candidates and order of [`Painting::greedy`], each painted
-    /// black unless it closes a cycle in the causal graph on the variables painted before.
-    /// Valid for [`Painting::dag`].
+    /// A greedy DAG painting of this crate (not one of the papers'): the candidates and order
+    /// of [`Painting::greedy`], each painted black unless it closes a cycle in the causal graph
+    /// on the variables painted before. Valid for [`Painting::dag`].
     #[must_use]
     pub fn greedy_dag(task: &Task) -> Self {
         let mut candidates = repairable(task);
@@ -202,13 +230,15 @@ impl Painting {
         Self { black }
     }
 
-    /// A greedy painting: among the eligible variables whose domain transition graph is
-    /// strongly connected (every value can reach every other, ignoring the conditions on
-    /// other variables), paint black in order of ascending domain size, then variable id,
-    /// each one not linked in the causal graph to one painted before.
+    /// A greedy painting of this crate (not one of the papers'): among the eligible
+    /// RSE-invertible variables, paint black in order of ascending domain size, then variable
+    /// id, each one not linked in the causal graph to one painted before. The repair of such
+    /// a painting never falls back to `h_FF`.
     ///
-    /// Strongly connected domain transition graphs make it likely that the repair can move a
-    /// black variable back to a value it left.
+    /// A variable is RSE-invertible (relaxed side effects invertible; Katz, Hoffmann &
+    /// Domshlak 2013) if every arc `d → d'` of its domain transition graph has an inverse arc
+    /// `d' → d` whose conditions on other variables are among the conditions and effects of
+    /// the original arc. Moving a black variable back is then always possible once it moved.
     #[must_use]
     pub fn greedy(task: &Task) -> Self {
         let mut candidates = repairable(task);
@@ -217,21 +247,25 @@ impl Painting {
         Self::independent(&CausalGraph::new(task), candidates)
     }
 
-    /// A painting by causal graph level, inspired by the red-black papers (Katz, Hoffmann &
-    /// Domshlak 2013; Domshlak, Hoffmann & Katz 2015) but not checked against their exact
-    /// criteria: among the
-    /// eligible variables with a strongly connected domain transition graph, paint black from
-    /// the `start` end of the causal graph, each one not linked to one painted before.
+    /// The causal graph level strategy (L, or its inverse) of Domshlak, Hoffmann & Katz
+    /// (2015, Section 6.1), for `fragment`.
+    ///
+    /// Follows their Figure 8: the variables that are ineligible, not RSE-invertible (see
+    /// [`Painting::greedy`]) or leaves of the causal graph start red; while the black causal
+    /// graph is not in `fragment`, the black variable with the highest causal graph level
+    /// (closest to the leaves) is painted red, or with [`CausalLevel::Bottom`] the one with the
+    /// lowest; finally the variables painted red are tried black again, last first, and kept
+    /// black if the graph stays in `fragment`. The result is maximal.
     ///
     /// The level of a variable is the length of the longest path to it from a source of the
-    /// condensed causal graph (its strongly connected components); ties go to the lower
-    /// variable id. Variables high in the graph tend to be the ones whose real semantics the
-    /// relaxation loses most (a truck that "is everywhere at once").
+    /// condensed causal graph (its strongly connected components); ties go to the higher
+    /// variable id for "highest" and the lower for "lowest", which follows the causal graph
+    /// order a Fast Downward translation numbers its variables in.
     ///
     /// # Examples
     ///
     /// ```
-    /// use planning_heuristics::{CausalLevel, Painting};
+    /// use planning_heuristics::{CausalLevel, Fragment, Painting};
     /// use sas_plus::{Effect, Fact, Operator, State, Task, Variable};
     ///
     /// // A truck (variable 0) carries a package (variable 1: at a, at b, in the truck) from a
@@ -258,34 +292,86 @@ impl Painting {
     ///     axioms: vec![],
     /// };
     ///
-    /// // The truck is a precondition of every package move: top of the causal graph.
-    /// assert_eq!(Painting::causal_graph_level(&task, CausalLevel::Top).black(), [0]);
-    /// assert_eq!(Painting::causal_graph_level(&task, CausalLevel::Bottom).black(), [1]);
+    /// // The package is a leaf of the causal graph, so it is red under every strategy.
+    /// let top = Painting::causal_graph_level(&task, CausalLevel::Top, Fragment::Arcless);
+    /// assert_eq!(top.black(), [0]);
     /// ```
     #[must_use]
-    pub fn causal_graph_level(task: &Task, start: CausalLevel) -> Self {
+    pub fn causal_graph_level(task: &Task, keep: CausalLevel, fragment: Fragment) -> Self {
         let graph = CausalGraph::new(task);
         let level = levels(task.num_variables(), |v| graph.successors(v));
-        let mut candidates = repairable(task);
-        match start {
-            CausalLevel::Top => candidates.sort_by_key(|&v| (level[v], v)),
-            CausalLevel::Bottom => candidates.sort_by_key(|&v| (core::cmp::Reverse(level[v]), v)),
-        }
+        let black = strategy::paint(task, &graph, fragment, |black| match keep {
+            CausalLevel::Top => max_by_key(black, |v| (level[v], v)),
+            CausalLevel::Bottom => max_by_key(black, |v| (Reverse(level[v]), Reverse(v))),
+        });
 
-        Self::independent(&graph, candidates)
+        Self { black }
     }
 
-    /// A conflict-directed painting, inspired by the red-black papers but not checked against
-    /// their exact criteria: paint black the variables whose real semantics the relaxed plan
-    /// of `state` violates most often.
+    /// The incident arcs strategy (A) of Domshlak, Hoffmann & Katz (2015, Section 6.1; also
+    /// Katz, Hoffmann & Domshlak, AAAI 2013), for `fragment`: Figure 8 as in
+    /// [`Painting::causal_graph_level`], painting red the black variable with the most causal
+    /// graph arcs to other black variables (each direction counts), ties to the smaller
+    /// domain, then to strategy L. This aims to paint few variables red.
     ///
-    /// The `h_FF` relaxed plan of `state` is replayed with each variable's real value; a
-    /// *conflict* of a variable is an operator of the plan whose precondition on it differs
-    /// from its current value (the value is then assumed moved), or a goal on it that differs
-    /// at the end. Among the eligible variables with a strongly connected domain transition
-    /// graph and at least one conflict, paint black by descending conflicts (then variable
-    /// id), each one not linked in the causal graph to one painted before. All red if `state`
-    /// is a dead end or nothing conflicts.
+    /// # Examples
+    ///
+    /// ```
+    /// use planning_heuristics::{Fragment, Painting};
+    /// use sas_plus::{Effect, Fact, Operator, State, Task, Variable};
+    ///
+    /// // A hub (variable 0) both needs and is needed by spokes 1 and 2; the hub has the most
+    /// // arcs (four) and turns red, the spokes are not linked and stay black.
+    /// let flip = |var: usize, from: u32, need: Vec<Fact>| {
+    ///     let mut pre = vec![Fact::new(var, from)];
+    ///     pre.extend(need);
+    ///     Operator {
+    ///         name: format!("flip{var}-{from}"),
+    ///         pre,
+    ///         eff: vec![Effect::new(Fact::new(var, 1 - from))],
+    ///         cost: 1,
+    ///     }
+    /// };
+    /// let mut operators = Vec::new();
+    /// for from in 0..2 {
+    ///     operators.push(flip(0, from, vec![Fact::new(1, 0), Fact::new(2, 0)]));
+    ///     operators.push(flip(1, from, vec![Fact::new(0, 0)]));
+    ///     operators.push(flip(2, from, vec![Fact::new(0, 0)]));
+    /// }
+    ///
+    /// let task = Task {
+    ///     variables: (0..3).map(|i| Variable::new(format!("v{i}"), 2)).collect(),
+    ///     operators,
+    ///     initial: State(vec![0, 0, 0]),
+    ///     goal: vec![Fact::new(1, 1)],
+    ///     axioms: vec![],
+    /// };
+    ///
+    /// assert_eq!(Painting::incident_arcs(&task, Fragment::Arcless).black(), [1, 2]);
+    /// ```
+    #[must_use]
+    pub fn incident_arcs(task: &Task, fragment: Fragment) -> Self {
+        let graph = CausalGraph::new(task);
+        let level = levels(task.num_variables(), |v| graph.successors(v));
+        let domain = |v: VarId| task.variables[v].domain_size;
+        let black = strategy::paint(task, &graph, fragment, |black| {
+            let arcs = |v| strategy::incident_arcs(&graph, black, v);
+            max_by_key(black, |v| (arcs(v), Reverse(domain(v)), level[v], v))
+        });
+
+        Self { black }
+    }
+
+    /// The conflict-directed strategy (C) of Domshlak, Hoffmann & Katz (2015, Section 6.1;
+    /// also Katz, Hoffmann & Domshlak, AAAI 2013), for `fragment`: Figure 8 as in
+    /// [`Painting::causal_graph_level`], painting red the black variable with the fewest
+    /// conflicts, ties to strategy L, so the most critical variables stay black.
+    ///
+    /// A *conflict* of a variable is an action of the `h_FF` relaxed plan of `state` (the
+    /// papers use the initial state) whose precondition on it is violated when the plan is
+    /// executed with only that variable black; the value is then assumed moved to the
+    /// precondition. If `state` is a dead end, every variable has no conflicts and the
+    /// strategy is L.
     ///
     /// # Panics
     ///
@@ -294,7 +380,7 @@ impl Painting {
     /// # Examples
     ///
     /// ```
-    /// use planning_heuristics::{HFf, Painting, RedBlack};
+    /// use planning_heuristics::{Fragment, HFf, Painting, RedBlack};
     /// use sas_plus::{Effect, Fact, Operator, State, Task, Variable};
     ///
     /// // A truck (variable 0) carries a package (variable 1: at a, at b, in the truck) from a
@@ -322,26 +408,25 @@ impl Painting {
     /// };
     /// let state = task.initial_state();
     ///
-    /// // The relaxed plan leaves the truck at b but the goal wants it at a: one conflict.
-    /// let painting = Painting::conflict_directed(&task, &state);
+    /// // The truck stays black and must really drive back to a.
+    /// let painting = Painting::conflict_directed(&task, &state, Fragment::Arcless);
     /// assert_eq!(painting.black(), [0]);
     /// assert_eq!(HFf::new(&task).value(&state), Some(3));
     /// assert_eq!(RedBlack::with_painting(&task, &painting).value(&state), Some(4));
     /// ```
     #[must_use]
-    pub fn conflict_directed(task: &Task, state: &State) -> Self {
-        let Some(plan) = Relaxation::new(task).relaxed_plan(state) else {
-            return Self::all_red();
-        };
+    pub fn conflict_directed(task: &Task, state: &State, fragment: Fragment) -> Self {
+        let conflicts = Relaxation::new(task).relaxed_plan(state).map_or_else(
+            || alloc::vec![0; task.num_variables()],
+            |plan| strategy::conflicts(task, &state.0, plan.ops()),
+        );
+        let graph = CausalGraph::new(task);
+        let level = levels(task.num_variables(), |v| graph.successors(v));
+        let black = strategy::paint(task, &graph, fragment, |black| {
+            max_by_key(black, |v| (Reverse(conflicts[v]), level[v], v))
+        });
 
-        let conflicts = conflicts(task, state, plan.ops());
-        let mut candidates: Vec<VarId> = repairable(task)
-            .into_iter()
-            .filter(|&v| conflicts[v] > 0)
-            .collect();
-        candidates.sort_by_key(|&v| (core::cmp::Reverse(conflicts[v]), v));
-
-        Self::independent(&CausalGraph::new(task), candidates)
+        Self { black }
     }
 
     /// Paints `candidates` black in order, skipping each one linked in `graph` to one painted
@@ -396,12 +481,21 @@ fn ineligible(task: &Task) -> Vec<Option<PaintingError>> {
     reason
 }
 
-/// The eligible variables whose domain transition graph is strongly connected, ascending.
+/// The eligible RSE-invertible variables, ascending.
 fn repairable(task: &Task) -> Vec<VarId> {
     let excluded = ineligible(task);
     (0..task.num_variables())
-        .filter(|&v| excluded[v].is_none() && strongly_connected(task, v))
+        .filter(|&v| excluded[v].is_none() && is_rse_invertible(task, v))
         .collect()
+}
+
+/// The variable of `candidates` (not empty) with the largest `key`.
+fn max_by_key<K: Ord>(candidates: &[VarId], key: impl Fn(VarId) -> K) -> VarId {
+    candidates
+        .iter()
+        .copied()
+        .max_by_key(|&v| key(v))
+        .expect("there are candidates")
 }
 
 /// For each of the `n` nodes of a graph with `successors`, the length of the longest path to
@@ -512,32 +606,6 @@ fn components<'g>(n: usize, successors: &impl Fn(usize) -> &'g [usize]) -> Vec<u
     t.component
 }
 
-/// Per variable, the conflicts of the relaxed `plan` from `state`; see
-/// [`Painting::conflict_directed`].
-fn conflicts(task: &Task, state: &State, plan: &[sas_plus::OpId]) -> Vec<usize> {
-    let mut value = state.0.clone();
-    let mut conflicts = alloc::vec![0; task.num_variables()];
-    for &op in plan {
-        let operator = &task.operators[op];
-        for f in &operator.pre {
-            if value[f.var] != f.value {
-                conflicts[f.var] += 1;
-                value[f.var] = f.value;
-            }
-        }
-
-        for e in operator.eff.iter().filter(|e| e.conditions.is_empty()) {
-            value[e.fact.var] = e.fact.value;
-        }
-    }
-
-    for g in &task.goal {
-        conflicts[g.var] += usize::from(value[g.var] != g.value);
-    }
-
-    conflicts
-}
-
 /// An arc `(u, v)` of the causal graph between variables of `black` (ascending) that lies on
 /// a cycle of the graph induced on them; `None` if that graph is acyclic.
 fn cycle_arc(graph: &CausalGraph, black: &[VarId]) -> Option<(VarId, VarId)> {
@@ -562,50 +630,6 @@ fn cycle_arc(graph: &CausalGraph, black: &[VarId]) -> Option<(VarId, VarId)> {
 /// Whether `u` and `v` are linked by an arc of the causal graph in either direction.
 fn linked(graph: &CausalGraph, u: VarId, v: VarId) -> bool {
     graph.successors(u).binary_search(&v).is_ok() || graph.successors(v).binary_search(&u).is_ok()
-}
-
-/// Whether every value of `var` can reach every other through operator effects on `var`,
-/// ignoring all conditions on other variables.
-fn strongly_connected(task: &Task, var: VarId) -> bool {
-    let n = task.variables[var].domain_size as usize;
-    let mut arcs: Vec<(usize, usize)> = Vec::new();
-    for op in &task.operators {
-        let pre = op
-            .pre
-            .iter()
-            .find(|f| f.var == var)
-            .map(|f| f.value as usize);
-        for e in op.eff.iter().filter(|e| e.fact.var == var) {
-            let to = e.fact.value as usize;
-            match pre {
-                Some(from) => arcs.push((from, to)),
-                None => arcs.extend((0..n).map(|from| (from, to))),
-            }
-        }
-    }
-
-    let forward = reach(n, &arcs, false);
-    let backward = reach(n, &arcs, true);
-
-    forward.iter().chain(&backward).all(|&r| r)
-}
-
-/// Which of the `n` nodes value 0 reaches along `arcs` (`reverse`: against them).
-fn reach(n: usize, arcs: &[(usize, usize)], reverse: bool) -> Vec<bool> {
-    let mut seen = alloc::vec![false; n];
-    let mut stack = alloc::vec![0];
-    seen[0] = true;
-    while let Some(x) = stack.pop() {
-        for &(a, b) in arcs {
-            let (from, to) = if reverse { (b, a) } else { (a, b) };
-            if from == x && !seen[to] {
-                seen[to] = true;
-                stack.push(to);
-            }
-        }
-    }
-
-    seen
 }
 
 #[cfg(test)]

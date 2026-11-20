@@ -3,7 +3,9 @@
 
 use std::collections::BTreeSet;
 
-use planning_heuristics::{CausalLevel, HFf, Painting, PaintingError, RedBlack, Relaxation};
+use planning_heuristics::{
+    CausalLevel, Fragment, HFf, Painting, PaintingError, RedBlack, Relaxation,
+};
 use sas_plus::random::{RandomTaskParams, random_task};
 use sas_plus::{Axiom, Effect, Fact, OpId, Operator, State, Task, Variable};
 
@@ -114,30 +116,50 @@ fn is_red_black_plan(task: &Task, black: &[usize], state: &State, plan: &[OpId])
     plan.iter().all(|&op| s.apply(op)) && task.goal.iter().all(|&g| s.holds(g))
 }
 
-/// The painting strategies checked, by label.
-const STRATEGIES: [&str; 5] = ["greedy", "top", "bottom", "conflicts", "dag"];
+/// The painting strategies checked, by label; those ending in `-dag` paint an acyclic black
+/// causal graph, the others an arcless one.
+const STRATEGIES: [&str; 10] = [
+    "greedy",
+    "greedy-dag",
+    "top",
+    "top-dag",
+    "bottom",
+    "bottom-dag",
+    "arcs",
+    "arcs-dag",
+    "conflicts",
+    "conflicts-dag",
+];
+
+/// The painting of `task` by strategy `label` (see [`STRATEGIES`]).
+fn paint(task: &Task, label: &str) -> Painting {
+    let fragment = if label.ends_with("-dag") {
+        Fragment::Dag
+    } else {
+        Fragment::Arcless
+    };
+    match label.trim_end_matches("-dag") {
+        "greedy" if fragment == Fragment::Dag => Painting::greedy_dag(task),
+        "greedy" => Painting::greedy(task),
+        "top" => Painting::causal_graph_level(task, CausalLevel::Top, fragment),
+        "bottom" => Painting::causal_graph_level(task, CausalLevel::Bottom, fragment),
+        "arcs" => Painting::incident_arcs(task, fragment),
+        "conflicts" => Painting::conflict_directed(task, &task.initial_state(), fragment),
+        _ => unreachable!("unknown strategy {label}"),
+    }
+}
 
 /// Checks `h_RB` with every strategy on every reachable state of `task`; returns, per entry of
 /// [`STRATEGIES`], the number of states where the repaired plan costs more than `h_FF`.
+///
+/// Every strategy paints only RSE-invertible variables, so the repair must always succeed
+/// (Domshlak, Hoffmann & Katz 2015, Corollary 1 and Theorem 11).
 fn check_red_black(name: &str, task: &Task) -> [usize; STRATEGIES.len()] {
-    let paintings = [
-        ("greedy", Painting::greedy(task)),
-        ("top", Painting::causal_graph_level(task, CausalLevel::Top)),
-        (
-            "bottom",
-            Painting::causal_graph_level(task, CausalLevel::Bottom),
-        ),
-        (
-            "conflicts",
-            Painting::conflict_directed(task, &task.initial_state()),
-        ),
-        ("dag", Painting::greedy_dag(task)),
-    ];
-
-    paintings.map(|(label, painting)| {
+    STRATEGIES.map(|label| {
+        let painting = paint(task, label);
         let black = painting.black().to_vec();
-        if label == "dag" {
-            Painting::dag(task, black).expect("the DAG strategy paints a DAG");
+        if label.ends_with("-dag") {
+            Painting::dag(task, black).expect("a DAG strategy paints a DAG");
         } else {
             Painting::new(task, black).expect("strategies paint independently");
         }
@@ -170,6 +192,7 @@ fn assert_each_matters(above: [usize; STRATEGIES.len()]) {
 
 /// Checks `h_RB` with `painting` on every reachable state of `task`; returns the number of
 /// states where the repaired plan costs more than `h_FF`.
+/// The painting must be in the tractable fragment: every repair must succeed.
 fn check_painting(name: &str, task: &Task, painting: &Painting) -> usize {
     let relaxation = Relaxation::new(task);
     let mut h_ff = HFf::with_relaxation(&relaxation);
@@ -195,22 +218,23 @@ fn check_painting(name: &str, task: &Task, painting: &Painting) -> usize {
             plan.cost(),
             ctx()
         );
-        if plan.is_repaired() {
-            assert!(
-                is_red_black_plan(task, &black, state, plan.ops()),
-                "{}",
-                ctx()
-            );
-            assert_eq!(
-                oracle::plan_cost(task, plan.ops()),
-                plan.cost(),
-                "{}",
-                ctx()
-            );
-            above_ff += usize::from(plan.cost() > ff);
-        } else {
-            assert_eq!(plan.cost(), ff, "fallback is h_FF, {}", ctx());
-        }
+        assert!(
+            plan.is_repaired(),
+            "repair failed in the fragment, {}",
+            ctx()
+        );
+        assert!(
+            is_red_black_plan(task, &black, state, plan.ops()),
+            "{}",
+            ctx()
+        );
+        assert_eq!(
+            oracle::plan_cost(task, plan.ops()),
+            plan.cost(),
+            "{}",
+            ctx()
+        );
+        above_ff += usize::from(plan.cost() > ff);
     }
 
     above_ff
@@ -417,15 +441,16 @@ fn painting_strategies_hand_checked() {
     };
     let state = task.initial_state();
 
-    assert_eq!(
-        Painting::causal_graph_level(&task, CausalLevel::Top).black(),
-        [0]
-    );
-    assert_eq!(
-        Painting::causal_graph_level(&task, CausalLevel::Bottom).black(),
-        [1]
-    );
-    let conflicts = Painting::conflict_directed(&task, &state);
+    for fragment in [Fragment::Arcless, Fragment::Dag] {
+        for keep in [CausalLevel::Top, CausalLevel::Bottom] {
+            let painting = Painting::causal_graph_level(&task, keep, fragment);
+            assert_eq!(painting.black(), [0], "the package is a leaf, so red");
+        }
+
+        assert_eq!(Painting::incident_arcs(&task, fragment).black(), [0]);
+    }
+
+    let conflicts = Painting::conflict_directed(&task, &state, Fragment::Arcless);
     assert_eq!(conflicts.black(), [0]);
 
     assert_eq!(HFf::new(&task).value(&state), Some(3));

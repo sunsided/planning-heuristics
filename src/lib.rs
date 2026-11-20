@@ -11,8 +11,9 @@
 //!   `h_max` summed over a partition of the operator costs; [`H2`]: `h²` (Haslum & Geffner
 //!   2000), which sees pairs of facts.
 //! - [`RedBlack`]: the red-black heuristic `h_RB` by relaxed plan repair (Domshlak, Hoffmann &
-//!   Katz 2015), with the black variables chosen by a [`Painting`]: greedy, by causal graph
-//!   level ([`CausalLevel`]) or conflict-directed.
+//!   Katz 2015), with the black variables chosen by a [`Painting`]: greedy, or by the papers'
+//!   strategies (causal graph level [`CausalLevel`], incident arcs, conflict-directed) for an
+//!   arcless or acyclic black causal graph ([`Fragment`]).
 //! - [`Relaxation::landmarks`]: `h^1` fact landmarks with natural orderings
 //!   ([`LandmarkGraph`]), and the heuristics [`LandmarkCount`] (inadmissible) and
 //!   [`UniformLandmarkCost`] (admissible, uniform cost partitioning); with feature `lp`,
@@ -103,7 +104,7 @@ pub use lm_cut::{ActionLandmark, LmCut};
 #[cfg(feature = "lp")]
 pub use operator_counting::{CountingConstraints, OperatorCounting};
 pub use path::{PathHeuristic, Stateless};
-pub use red_black::{CausalLevel, Painting, PaintingError, RedBlack, RedBlackPlan};
+pub use red_black::{CausalLevel, Fragment, Painting, PaintingError, RedBlack, RedBlackPlan};
 pub use relaxation::{Combine, Exploration, Relaxation, RelaxedPlan};
 pub use set_additive::HSetAdd;
 // The shared trait of the planning crates: `planning_heuristics::Heuristic` and

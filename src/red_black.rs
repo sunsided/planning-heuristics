@@ -1,5 +1,6 @@
-//! The red-black heuristic `h_RB` (Katz, Hoffmann & Domshlak 2013; Domshlak, Hoffmann &
-//! Katz 2015): red variables are delete-relaxed, black variables keep their real semantics.
+//! The red-black heuristic `h_RB` (Katz, Hoffmann & Domshlak, ICAPS 2013 and AAAI 2013;
+//! Domshlak, Hoffmann & Katz, AIJ 2015): red variables are delete-relaxed, black variables
+//! keep their real semantics.
 //!
 //! See [`RedBlack`] for the repair and [`Painting`] for the choice of black variables.
 
@@ -12,7 +13,7 @@ use alloc::vec::Vec;
 
 use sas_plus::{OpId, State, Task, VarId};
 
-pub use painting::{CausalLevel, Painting, PaintingError};
+pub use painting::{CausalLevel, Fragment, Painting, PaintingError};
 use repair::Repair;
 use tables::Tables;
 
@@ -60,8 +61,12 @@ impl RedBlackPlan {
 /// precondition value differs along a cheapest path in its domain transition graph (using only
 /// transitions whose red preconditions already hold), and at the end move the black variables
 /// to their goal values. The cost of the repaired plan is `h_RB`. If a needed path does not
-/// exist, the repair gives up and the estimate falls back to the relaxed plan cost (`h_FF`).
-/// So `h_RB >= h_FF` always, with equality when every variable is red. Not admissible.
+/// exist, the repair gives up and the estimate falls back to the relaxed plan cost (`h_FF`);
+/// with RSE-invertible black variables a path always exists (Domshlak, Hoffmann & Katz 2015,
+/// Corollary 1 and Theorem 11), so the fallback only happens outside that fragment or at the
+/// operator budget of a DAG painting. The repaired plan contains the relaxed plan, so
+/// `h_RB >= h_FF` always, with equality when every variable is red. Dead ends are exactly those
+/// of `h_FF` (no relaxed plan means no red-black plan). Not admissible.
 ///
 /// ```mermaid
 /// graph LR
@@ -74,8 +79,11 @@ impl RedBlackPlan {
 ///     path -->|"no path"| fallback["fall back to h_FF"]
 /// ```
 ///
-/// [`Painting`] decides which variables are black; see there for the restrictions that keep
-/// the repair polynomial.
+/// [`Painting`] decides which variables are black; see there for the restrictions that make
+/// the repair succeed. With an arcless black causal graph ([`Painting::new`]) the repair runs
+/// in polynomial time; with an acyclic one ([`Painting::dag`]) in time polynomial in the
+/// length of the repaired plan, which can be exponential (Domshlak, Hoffmann & Katz 2015,
+/// Proposition 2), so it is capped by an operator budget.
 ///
 /// # Examples
 ///
