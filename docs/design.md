@@ -189,10 +189,14 @@ C). All three were checked against the PDFs.
   `sas_plus::CausalGraph` (the arcless fragment), `Painting::dag` an acyclic black causal
   graph. Either way an operator changes at most one black variable (two black effects link
   them both ways: the causal graph has effect-effect arcs). Neither checks RSE-invertibility;
-  every strategy constructor paints only RSE-invertible variables.
-- Strategies: `Painting::causal_graph_level` (L, or its inverse with `CausalLevel::Bottom`),
-  `Painting::incident_arcs` (A) and `Painting::conflict_directed` (C) follow Figure 8 of the
-  AIJ paper for a `Fragment` (`Arcless`: configuration E, `Dag`: configuration D).
+  every strategy constructor paints only RSE-invertible variables. `Painting::bounded` allows
+  any black causal graph over a few variables (product of domain sizes at most 256), for the
+  fixed-number fragment.
+- Strategies: `Painting::with_strategy` runs Figure 8 of the AIJ paper for a `Fragment`
+  (`Arcless`: configuration E, `Dag`: configuration D) with every choice point of Section
+  6.1 (`Strategy`): L and L̄, A and Ā, C and C̄, C[N], CA[p], RND.
+  `Painting::causal_graph_level`, `Painting::incident_arcs` and `Painting::conflict_directed`
+  are shorthands for L, A and C.
   `Painting::greedy` and `Painting::greedy_dag` are this crate's own (smallest domain
   first, RSE-invertible candidates); `Painting::all_red` gives `h_FF`.
 - Plan repair (Figure 4): execute the `h_FF` relaxed plan under red-black semantics (red facts
@@ -202,21 +206,42 @@ C). All three were checked against the PDFs.
   variables. With a DAG painting each transition's black preconditions on causal-graph
   ancestors are satisfied recursively, descendants first (Figure 7), and only transitions of
   the projected task `Π^B` are used: black preconditions and the reached value visited before.
-  Value = cost of the repaired plan.
+  Value = cost of the repaired plan. Option F (`RedBlackOptions::forward`, AAAI) first moves
+  every operator without black effects as early as it can go.
+- Red facts following (`RedBlackOptions::follow`, AIJ Section 5.2, Figure 6): targets are
+  the red facts `R+` the relaxed plan needs; the main loop picks an operator whose red
+  preconditions hold, whose black ones lie in the achievable values `B`, and that adds a
+  missing `R+` fact, moves the black variables there with the same machinery as the repair
+  (DAG moves restricted to `B`), applies it and recomputes `B`.
+- Stop search (option S, AAAI): `RedBlackPlan::is_plan_for` tells a search the red-black
+  plan is a real plan; stopping is the search's business.
+- Fixed number of black variables (`Painting::bounded`; ICAPS Theorem 1): tree search over
+  the product variable with groups of freely switchable values (`src/red_black/product.rs`);
+  a node budget of 4096 falls back to `h_FF`, a proved-unsolvable state is a dead end.
 - If a needed path does not exist, or a DAG repair exceeds its operator budget, the estimate
   falls back to `h_FF` (`RedBlackPlan::is_repaired` is false). Inside the fragment
-  (RSE-invertible black variables) a path always exists. So `h_FF <= h_RB` always (the
-  repaired plan contains the relaxed plan); dead ends are those of `h_FF` (Corollary 1).
+  (RSE-invertible black variables) a path always exists. So for repair `h_FF <= h_RB` always
+  (the repaired plan contains the relaxed plan, also when forwarded); dead ends are those of
+  `h_FF` (Corollary 1). Following only guarantees `h_RB >= h+` (every red-black plan is a
+  relaxed plan); product search may find more dead ends than `h_FF`, all real.
 - Complexity: arcless, polynomial (paths are simple DTG paths). DAG: the papers' polynomial
   bound (AAAI Theorem 2, AIJ Theorem 11) holds only under Chen & Giménez's succinct macro
   plans; with explicit plans, as here and in the papers' implementation (AIJ Section 5.3.1),
   Figure 7 is polynomial in the returned plan length, which is worst-case exponential
   (Proposition 2). Hence the budget `1024 + 64 · |relaxed plan|` operators.
-- Not done: red facts following (`h^RB_follow`, AIJ Figure 6), relaxed plan forwarding (F)
-  and stop search (S) of the AAAI paper, painting strategies C[N], CA[p], RND and the inverses
-  of A and C, black variables with conditional effects, black derived variables, and the
-  fixed-number-of-black-variables fragment of the ICAPS paper (exponential in the product
-  of their domain sizes).
+- Succinct macro plans, not done. The papers only cite them (Chen & Giménez 2008, Theorem 23,
+  with Helmert's Observation 7) and describe them in one sentence ("recursive macros for
+  value pairs within DTGs"); the construction itself is not in any of the three papers. The
+  AIJ paper also argues against them (Section 5.3.1): macros must be rebuilt for every
+  `ACHIEVE` call, they move parent variables back to their initial values between requests
+  (longer plans, worse estimates), and its implementation uses explicit plans as we do.
+  Note that the heuristic value is the plan length, which can itself be exponential in the
+  number of black variables; a succinct plan would bound the runtime, not the value.
+- Not done: black variables with conditional effects, black derived variables, choice point
+  (ii) of AIJ Section 5.3.2 (prefer DTG paths whose red conditions are true under real
+  semantics), and the AIJ enumeration of SCC-changing action sequences for the
+  fixed-number fragment (its tighter `2k - 2` bound is a proof device; the ICAPS tree search
+  is implemented instead).
 
 ### Paper comparison
 
@@ -240,14 +265,29 @@ C). All three were checked against the PDFs.
 | A: most incident arcs to black variables, ties smaller domain, then L | `incident_arcs` (each direction counts) | matches |
 | C: fewest conflicts (relaxed plan actions whose precondition on `v` is violated with only `v` black), ties L | `conflict_directed` | matches; the papers do not say what the value is after a violation: we assume it moved there, as the repair does. Previously approximated (counted goals, painted greedily black): replaced |
 | C uses the relaxed plan of the initial state | any `state` argument; dead end gives zero conflicts | deliberate generalisation |
-| Theorem 14: red leaves do not change `h^RB*` | applied by the three paper strategies only | greedy paintings may keep leaves black (harmless) |
+| Theorem 14: red leaves do not change `h^RB*` | applied by every paper strategy | greedy paintings may keep leaves black (harmless) |
+| Ā, C̄: inverse selection, same tie-breaking | `Strategy::FewestArcs`, `Strategy::MostConflicts` | matches |
+| C[N]: minimal average conflicts over N random sample states | `Strategy::SampledConflicts` (sum = average × N) | deliberate choice: the paper does not say how it samples; random walks from the state of up to twice its relaxed plan length |
+| CA[p]: max `p·Â + (1−p)(1−Ĉ)`, normalised by the maxima over black variables, ties of A | `Strategy::Mixed { arcs_percent }`, exact integer arithmetic | matches (p in whole percent; a zero maximum counts as 1, leaving the zero counts at 0) |
+| RND: uniform choice | `Strategy::Random { seed }` (SplitMix64) | matches |
+| F: move actions without black effects towards the start; stop when the predecessor achieves a precondition (AAAI) | `forward.rs` | matches; effect conditions count as preconditions and an operator needing a derived fact does not move, so the reordered plan stays a relaxed plan |
+| S: stop when the red-black plan is a real plan (AAAI) | `RedBlackPlan::is_plan_for` | matches (the check; the search stops) |
+| Red facts following: `R+ = G[V^R] ∪ ⋃ pre(a)[V^R]`; loop over `A'`; `UPDATE` in topological order; `ACHIEVE` (AIJ Fig. 6) | `repair/follow.rs` | matches; `ACHIEVE` uses the dynamic red facts instead of the explicit inverse-arc set, as Section 5.3.1 does |
+| Choice point (i): fewest estimated steps via all-pairs DTG distances, prefer actions whose black moves delete no achieved `R+` fact (AIJ 5.3.2) | `best_candidate` | matches; distances are operator costs, ties to the lowest id |
+| With axioms a derived `R+` fact may have no achieving action | apply the first achievable unapplied relaxed plan action | our extension (the paper has no axioms); keeps the loop finite |
+| Fixed number of black variables, fixed domains: polynomial (ICAPS Thm. 1) | `Painting::bounded`, `product.rs` tree search with merged aggregate values | matches the ICAPS search; node budget and `h_FF` fallback are ours |
 
-Tests (for every strategy in both fragments): `h_RB >= h_FF`, same dead ends, `all_red` equals
+Tests (for every strategy in both fragments, each with plain repair, forwarding and red facts
+following): `h_RB >= h_FF` (following: `>= h_max`), same dead ends, `all_red` equals
 `h_FF`, every repair succeeds (and, for an out-of-fragment DAG painting, a failed repair
 costs exactly `h_FF`), every repaired plan valid under an independent red-black
 simulator with matching cost, and every strategy raises `h_RB` above `h_FF` somewhere. Unit
 tests check RSE-invertibility on the SimpleGrid hand variable and the Figure 8 maximality
-post-process on a StarShapeLogistics-like task.
+post-process on a StarShapeLogistics-like task. Every plan claiming to be real costs at least
+`h*`. Product search, on every task with as many variables black as fit: finite `h*` implies
+a plan, a proved dead end has `h* = ∞`, plans are valid red-black plans of cost at least
+`h_max`, and with every variable black they are real plans. A StarShapeLogistics test shows
+red facts following find the optimal plan where repair over-estimates.
 
 ## Landmarks (milestones 4 and 5, done)
 
@@ -492,8 +532,9 @@ the scaling of the indexed closure is not measured here.
    (`benches/relaxation.rs`) against width-search's sweep. Indexed axiom closure in
    the plan replay done. Open: preferred operators, incremental evaluation hooks. Then propose the
    width-search switch.
-3. Red-black `h_RB` (greedy and the papers' L, A and C paintings for arcless and DAG
-   fragments, plan repair), **done**.
+3. Red-black `h_RB` (greedy and all paper paintings for arcless and DAG fragments, plan
+   repair with forwarding, red facts following, stop search test, fixed-number fragment),
+   **done**.
 4. LM-cut, **done** (`src/lm_cut.rs`): `h_max` from scratch per round, operator-level
    costs over effect rules; `LmCut::new` splits conditional operators by context (at most 64
    copies each, `src/lm_cut/contexts.rs`), so the cut sum dominates `h_max`; the

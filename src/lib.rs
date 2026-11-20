@@ -10,10 +10,11 @@
 //! - [`HSetAdd`]: the set-additive heuristic `h_sa` (Keyder & Geffner 2008); [`AdditiveHMax`]:
 //!   `h_max` summed over a partition of the operator costs; [`H2`]: `h²` (Haslum & Geffner
 //!   2000), which sees pairs of facts.
-//! - [`RedBlack`]: the red-black heuristic `h_RB` by relaxed plan repair (Domshlak, Hoffmann &
+//! - [`RedBlack`]: the red-black heuristic `h_RB` (Domshlak, Hoffmann &
 //!   Katz 2015), with the black variables chosen by a [`Painting`]: greedy, or by the papers'
-//!   strategies (causal graph level [`CausalLevel`], incident arcs, conflict-directed) for an
-//!   arcless or acyclic black causal graph ([`Fragment`]).
+//!   strategies ([`Strategy`]) for an arcless or acyclic black causal graph ([`Fragment`]), or
+//!   a few black variables searched as a product ([`Painting::bounded`]); options
+//!   ([`RedBlackOptions`]) for relaxed plan forwarding and red facts following.
 //! - [`Relaxation::landmarks`]: `h^1` fact landmarks with natural orderings
 //!   ([`LandmarkGraph`]), and the heuristics [`LandmarkCount`] (inadmissible) and
 //!   [`UniformLandmarkCost`] (admissible, uniform cost partitioning); with feature `lp`,
