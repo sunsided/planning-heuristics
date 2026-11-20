@@ -292,7 +292,7 @@ fn value_of(holds: &[bool], offset: usize, n: u32) -> u32 {
 ///
 /// shortcut: rescans all axioms per pass like the old replay closure; index it as in
 /// `Relaxation::close_axioms` once red-black runs on axiom-heavy tasks.
-fn close_axioms(relaxation: &Relaxation, holds: &mut [bool]) {
+pub(super) fn close_axioms(relaxation: &Relaxation, holds: &mut [bool]) {
     let mut changed = true;
     while changed {
         changed = false;

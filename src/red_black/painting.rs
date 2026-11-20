@@ -31,7 +31,14 @@ pub use strategy::Strategy;
 pub struct Painting {
     /// The black variables, ascending.
     black: Vec<VarId>,
+    /// Whether this is a [`Painting::bounded`] painting, solved by product search instead of
+    /// relaxed plan repair.
+    bounded: bool,
 }
+
+/// The largest product of the domain sizes of the black variables of a
+/// [`Painting::bounded`] painting.
+pub const MAX_BOUNDED_PRODUCT: usize = 256;
 
 /// Which end of the causal graph [`Painting::causal_graph_level`] keeps black.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -73,6 +80,9 @@ pub enum PaintingError {
     /// The causal graph on the black variables has a cycle through these two (one arc of it);
     /// see [`Painting::dag`].
     Cyclic(VarId, VarId),
+    /// The product of the black domain sizes exceeds [`MAX_BOUNDED_PRODUCT`]; see
+    /// [`Painting::bounded`].
+    TooLarge,
 }
 
 impl fmt::Display for PaintingError {
@@ -93,6 +103,10 @@ impl fmt::Display for PaintingError {
                     "variables {u} and {v} lie on a cycle of the black causal graph"
                 )
             }
+            Self::TooLarge => write!(
+                f,
+                "the black domain sizes multiply to more than {MAX_BOUNDED_PRODUCT}"
+            ),
         }
     }
 }
@@ -116,19 +130,8 @@ impl Painting {
     /// - [`PaintingError::Derived`], [`PaintingError::InAxiom`] or
     ///   [`PaintingError::ConditionalEffect`] if a variable is not eligible;
     /// - [`PaintingError::Dependent`] for the first two linked variables.
-    pub fn new(task: &Task, mut black: Vec<VarId>) -> Result<Self, PaintingError> {
-        black.sort_unstable();
-        black.dedup();
-        let excluded = ineligible(task);
-        for &v in &black {
-            if v >= task.num_variables() {
-                return Err(PaintingError::UnknownVariable(v));
-            }
-
-            if let Some(reason) = excluded[v] {
-                return Err(reason);
-            }
-        }
+    pub fn new(task: &Task, black: Vec<VarId>) -> Result<Self, PaintingError> {
+        let black = eligible(task, black)?;
 
         let graph = CausalGraph::new(task);
         for (i, &u) in black.iter().enumerate() {
@@ -137,7 +140,10 @@ impl Painting {
             }
         }
 
-        Ok(Self { black })
+        Ok(Self {
+            black,
+            bounded: false,
+        })
     }
 
     /// Paints exactly `black` black, allowing causal-graph arcs between black variables as long
@@ -189,23 +195,15 @@ impl Painting {
     /// assert_eq!(Painting::new(&task, vec![0, 1]), Err(PaintingError::Dependent(0, 1)));
     /// assert_eq!(Painting::dag(&task, vec![0, 1]).unwrap().black(), [0, 1]);
     /// ```
-    pub fn dag(task: &Task, mut black: Vec<VarId>) -> Result<Self, PaintingError> {
-        black.sort_unstable();
-        black.dedup();
-        let excluded = ineligible(task);
-        for &v in &black {
-            if v >= task.num_variables() {
-                return Err(PaintingError::UnknownVariable(v));
-            }
-
-            if let Some(reason) = excluded[v] {
-                return Err(reason);
-            }
-        }
+    pub fn dag(task: &Task, black: Vec<VarId>) -> Result<Self, PaintingError> {
+        let black = eligible(task, black)?;
 
         match cycle_arc(&CausalGraph::new(task), &black) {
             Some((u, v)) => Err(PaintingError::Cyclic(u, v)),
-            None => Ok(Self { black }),
+            None => Ok(Self {
+                black,
+                bounded: false,
+            }),
         }
     }
 
@@ -226,7 +224,10 @@ impl Painting {
             }
         }
 
-        Self { black }
+        Self {
+            black,
+            bounded: false,
+        }
     }
 
     /// A greedy painting of this crate (not one of the papers'): among the eligible
@@ -449,6 +450,7 @@ impl Painting {
     ) -> Self {
         Self {
             black: strategy::paint_with(task, state, strategy, fragment),
+            bounded: false,
         }
     }
 
@@ -463,7 +465,72 @@ impl Painting {
         }
 
         black.sort_unstable();
-        Self { black }
+        Self {
+            black,
+            bounded: false,
+        }
+    }
+
+    /// Paints exactly `black` black, with any causal graph on them, for the fragment of a
+    /// fixed number of black variables with fixed-size domains (Katz, Hoffmann & Domshlak,
+    /// ICAPS 2013, Theorem 1; Domshlak, Hoffmann & Katz 2015, Theorem 1). [`crate::RedBlack`]
+    /// then searches red-black plans over the product of the black domains instead of
+    /// repairing a relaxed plan: polynomial for a fixed product size, exponential in it. A
+    /// state it proves unsolvable is a dead end even if the relaxed plan exists.
+    ///
+    /// # Errors
+    ///
+    /// - [`PaintingError::UnknownVariable`], [`PaintingError::Derived`],
+    ///   [`PaintingError::InAxiom`] or [`PaintingError::ConditionalEffect`] as for
+    ///   [`Painting::new`];
+    /// - [`PaintingError::TooLarge`] if the domain sizes multiply to more than
+    ///   [`MAX_BOUNDED_PRODUCT`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use planning_heuristics::{Painting, PaintingError};
+    /// use sas_plus::{Effect, Fact, Operator, State, Task, Variable};
+    ///
+    /// // Two variables that need each other: a cycle, fine for a bounded painting.
+    /// let flip = |var: usize, other: usize| Operator {
+    ///     name: format!("flip{var}"),
+    ///     pre: vec![Fact::new(var, 0), Fact::new(other, 0)],
+    ///     eff: vec![Effect::new(Fact::new(var, 1))],
+    ///     cost: 1,
+    /// };
+    /// let task = Task {
+    ///     variables: vec![Variable::new("a", 2), Variable::new("b", 2)],
+    ///     operators: vec![flip(0, 1), flip(1, 0)],
+    ///     initial: State(vec![0, 0]),
+    ///     goal: vec![Fact::new(0, 1)],
+    ///     axioms: vec![],
+    /// };
+    ///
+    /// assert!(matches!(Painting::dag(&task, vec![0, 1]), Err(PaintingError::Cyclic(..))));
+    /// assert!(Painting::bounded(&task, vec![0, 1]).unwrap().is_bounded());
+    /// ```
+    pub fn bounded(task: &Task, black: Vec<VarId>) -> Result<Self, PaintingError> {
+        let black = eligible(task, black)?;
+        let mut product: usize = 1;
+        for &v in &black {
+            let size = task.variables[v].domain_size as usize;
+            product = product
+                .checked_mul(size)
+                .filter(|&p| p <= MAX_BOUNDED_PRODUCT)
+                .ok_or(PaintingError::TooLarge)?;
+        }
+
+        Ok(Self {
+            black,
+            bounded: true,
+        })
+    }
+
+    /// Whether this is a [`Painting::bounded`] painting.
+    #[must_use]
+    pub fn is_bounded(&self) -> bool {
+        self.bounded
     }
 
     /// The black variables, ascending.
@@ -471,6 +538,24 @@ impl Painting {
     pub fn black(&self) -> &[VarId] {
         &self.black
     }
+}
+
+/// `black` sorted and deduplicated, after checking each variable exists and is eligible.
+fn eligible(task: &Task, mut black: Vec<VarId>) -> Result<Vec<VarId>, PaintingError> {
+    black.sort_unstable();
+    black.dedup();
+    let excluded = ineligible(task);
+    for &v in &black {
+        if v >= task.num_variables() {
+            return Err(PaintingError::UnknownVariable(v));
+        }
+
+        if let Some(reason) = excluded[v] {
+            return Err(reason);
+        }
+    }
+
+    Ok(black)
 }
 
 /// For each variable, why it cannot be black; `None` if it can.

@@ -180,6 +180,7 @@ fn paint(task: &Task, label: &str) -> Painting {
 /// (Domshlak, Hoffmann & Katz 2015, Corollary 1 and Theorem 11).
 fn check_red_black(name: &str, task: &Task) -> [usize; STRATEGIES.len()] {
     check_painting(&format!("{name}, any"), task, &any_dag(task), false);
+    check_bounded(name, task);
 
     STRATEGIES.map(|label| {
         let painting = paint(task, label);
@@ -192,6 +193,76 @@ fn check_red_black(name: &str, task: &Task) -> [usize; STRATEGIES.len()] {
 
         check_painting(&format!("{name}, {label}"), task, &painting, true)
     })
+}
+
+/// Checks product search with a [`Painting::bounded`] painting of as many variables as fit
+/// (in id order) on every reachable state of `task`.
+///
+/// Red-black planning is a relaxation, so the search must find a plan whenever `h*` is
+/// finite (unless its budget runs out), and a state it proves unsolvable must have `h* = ∞`.
+/// Found plans must be valid red-black plans costing at least `h_max`; when every variable is
+/// black, they must be real plans.
+fn check_bounded(name: &str, task: &Task) {
+    let mut black = Vec::new();
+    for v in 0..task.num_variables() {
+        black.push(v);
+        if Painting::bounded(task, black.clone()).is_err() {
+            black.pop();
+        }
+    }
+
+    let painting = Painting::bounded(task, black.clone()).expect("built from accepted sets");
+    let all_black = black.len() == task.num_variables();
+    let relaxation = Relaxation::new(task);
+    let mut h_ff = HFf::with_relaxation(&relaxation);
+    let mut h_max = HMax::with_relaxation(&relaxation);
+    let mut h_rb = RedBlack::with_relaxation(task, &relaxation, &painting);
+    for (state, h_star) in &oracle::perfect(task) {
+        let ctx = || format!("{name}, bounded, state {:?}, black {black:?}", state.0);
+        let ff = h_ff.value(state);
+        let plan = h_rb.plan(state);
+        if ff.is_none() {
+            assert!(plan.is_none(), "dead end for h_FF, {}", ctx());
+        }
+
+        let Some(plan) = plan else {
+            assert!(
+                h_star.is_none(),
+                "proved unsolvable but h* {h_star:?}, {}",
+                ctx()
+            );
+            continue;
+        };
+
+        if !plan.is_repaired() {
+            assert_eq!(Some(plan.cost()), ff, "fallback is h_FF, {}", ctx());
+            continue;
+        }
+
+        assert!(
+            is_red_black_plan(task, &black, state, plan.ops()),
+            "{}",
+            ctx()
+        );
+        assert_eq!(
+            oracle::plan_cost(task, plan.ops()),
+            plan.cost(),
+            "{}",
+            ctx()
+        );
+        assert!(
+            plan.cost() >= h_max.value(state).expect("solvable"),
+            "{}",
+            ctx()
+        );
+        if all_black {
+            assert!(
+                plan.is_plan_for(task, state),
+                "all black is real, {}",
+                ctx()
+            );
+        }
+    }
 }
 
 /// A DAG painting that ignores RSE-invertibility: every variable, in id order, that
@@ -756,5 +827,39 @@ fn red_facts_following_on_star_shape_logistics() {
     assert!(
         repaired > 7,
         "the repair follows the relaxed plan's order: {repaired}"
+    );
+}
+
+/// Product search over a bounded painting: a black switch must be on to fetch `a` and off to
+/// fetch `b`, and nothing turns it off. Repair of the relaxed plan (`on, fetch-a, fetch-b`)
+/// falls back to `h_FF`; the search fetches `b` first. With the goal also wanting the switch
+/// off, the red-black task is unsolvable although the relaxation is not: a dead end.
+#[test]
+fn bounded_painting_searches_products() {
+    let on = op(vec![Fact::new(0, 0)], vec![Effect::new(Fact::new(0, 1))]);
+    let fetch_a = op(vec![Fact::new(0, 1)], vec![Effect::new(Fact::new(1, 1))]);
+    let fetch_b = op(vec![Fact::new(0, 0)], vec![Effect::new(Fact::new(2, 1))]);
+    let mut task = binary_task(3, vec![on, fetch_a, fetch_b]);
+    task.goal = vec![Fact::new(1, 1), Fact::new(2, 1)];
+    let state = task.initial_state();
+    let painting = Painting::bounded(&task, vec![0]).unwrap();
+    let plan = RedBlack::with_painting(&task, &painting)
+        .plan(&state)
+        .unwrap();
+
+    assert!(plan.is_repaired());
+    assert_eq!(plan.ops(), [2, 0, 1]);
+    assert!(plan.is_plan_for(&task, &state));
+
+    task.goal.push(Fact::new(0, 0));
+    assert_eq!(HFf::new(&task).value(&state), Some(3));
+    let painting = Painting::bounded(&task, vec![0]).unwrap();
+    assert_eq!(
+        RedBlack::with_painting(&task, &painting).value(&state),
+        None
+    );
+    assert_eq!(
+        Painting::bounded(&binary_task(9, vec![]), (0..9).collect()),
+        Err(PaintingError::TooLarge)
     );
 }

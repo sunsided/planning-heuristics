@@ -105,8 +105,8 @@ pub use lm_cut::{ActionLandmark, LmCut};
 pub use operator_counting::{CountingConstraints, OperatorCounting};
 pub use path::{PathHeuristic, Stateless};
 pub use red_black::{
-    CausalLevel, Fragment, Painting, PaintingError, RedBlack, RedBlackOptions, RedBlackPlan,
-    Strategy,
+    CausalLevel, Fragment, MAX_BOUNDED_PRODUCT, Painting, PaintingError, RedBlack, RedBlackOptions,
+    RedBlackPlan, Strategy,
 };
 pub use relaxation::{Combine, Exploration, Relaxation, RelaxedPlan};
 pub use set_additive::HSetAdd;

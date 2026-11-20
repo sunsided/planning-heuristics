@@ -6,6 +6,7 @@
 
 mod forward;
 mod painting;
+mod product;
 mod repair;
 mod tables;
 
@@ -14,7 +15,8 @@ use alloc::vec::Vec;
 
 use sas_plus::{OpId, State, Task, VarId};
 
-pub use painting::{CausalLevel, Fragment, Painting, PaintingError, Strategy};
+pub use painting::{CausalLevel, Fragment, MAX_BOUNDED_PRODUCT, Painting, PaintingError, Strategy};
+use product::{Outcome, Product};
 use repair::Repair;
 use tables::Tables;
 
@@ -189,6 +191,9 @@ pub struct RedBlack<'r> {
     options: RedBlackOptions,
     /// The relaxed plan handed to the repair, forwarded if [`RedBlackOptions::forward`].
     relaxed: Vec<OpId>,
+    /// The product compilation of a [`Painting::bounded`] painting, which replaces the
+    /// repair by product search.
+    product: Option<Product>,
 }
 
 impl RedBlack<'static> {
@@ -223,6 +228,9 @@ impl<'r> RedBlack<'r> {
     /// The heuristic over `relaxation`, with the repair tables of `task` under `painting`.
     fn build(task: &Task, relaxation: Cow<'r, Relaxation>, painting: &Painting) -> Self {
         let tables = Tables::new(task, &relaxation, painting.black());
+        let product = painting
+            .is_bounded()
+            .then(|| Product::new(task, &relaxation, painting.black()));
 
         Self {
             relaxation,
@@ -232,6 +240,7 @@ impl<'r> RedBlack<'r> {
             repair: Repair::default(),
             options: RedBlackOptions::default(),
             relaxed: Vec::new(),
+            product,
         }
     }
 
@@ -307,6 +316,17 @@ impl<'r> RedBlack<'r> {
         let ff = self
             .relaxation
             .relaxed_plan_in(state, &mut self.workspace)?;
+        if let Some(product) = &self.product {
+            return match product.search(&self.relaxation, state) {
+                Outcome::Plan(plan, cost) => {
+                    self.repair.plan = plan;
+                    Some((cost, true))
+                }
+                Outcome::Unsolvable => None,
+                Outcome::Exhausted => Some((ff, false)),
+            };
+        }
+
         self.relaxed.clone_from(&self.workspace.plan);
         if self.options.forward && !self.options.follow {
             forward::forward(&self.tables, &mut self.relaxed);
