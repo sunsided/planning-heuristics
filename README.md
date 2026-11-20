@@ -7,16 +7,19 @@ Heuristics for classical planning: red-black, FF, landmark and abstraction heuri
 - `h_max`, `h_add` and `h_FF` with relaxed plan extraction (delete relaxation)
 - Red-black heuristic `h_RB` by relaxed plan repair, painted greedily, by causal graph level,
   conflict-directed or explicitly
-- `h^1` fact landmarks with natural orderings; landmark count (inadmissible) and uniform
-  landmark cost partitioning (admissible); optimal landmark cost partitioning by LP
-  (feature `lp`)
+- `h^1` fact landmarks with natural orderings, and RHW back-chained landmarks with disjunctive
+  and DTG landmarks, greedy-necessary and reasonable orderings; landmark count (inadmissible)
+  and uniform landmark cost partitioning (admissible); optimal landmark cost partitioning by
+  LP (feature `lp`)
+- LAMA-style landmark tracking along the search path (`PathHeuristic`, `LandmarkTracker`),
+  inadmissible count or admissible uniform cost partitioning
 - LM-cut (`h_LM-cut`), admissible, with conditional effects and axioms
 - Abstraction heuristics: any `sas_plus::Abstraction`, pattern databases over
   `sas_plus::Projection`, and (optional features) merge-and-shrink and saturated cost
   partitioning
 
-Not yet: LAMA-style landmark tracking along
-the search path, preferred operators.
+Not yet: preferred operators, LM-cut context splitting for conditional effects, and the larger
+red-black tractable fragments (black variables linked in the causal graph).
 
 The `Heuristic` trait, `heuristic_fn` and `HeuristicFn` are
 [search-core](https://github.com/sunsided/search-core)'s, re-exported from the crate root, so
@@ -28,7 +31,6 @@ these heuristics plug into every search crate built on it.
   in `Adapter` to get a `Heuristic`.
 - `cost-partition`: the same for `cost_partition::CostPartitionedHeuristic` and
   `MaxOverOrders`.
-
 - `lp`: `OptimalLandmarkCost`, the optimal landmark cost partitioning, solved with the
   pure-Rust `microlp`. It needs `std` and Rust 1.86 (the rest of the crate: 1.85).
 

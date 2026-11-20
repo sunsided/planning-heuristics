@@ -1,6 +1,6 @@
 # planning-heuristics: design
 
-Status: draft, milestone 1 implemented (branch `draft/initial`). Version stays 0.0.0.
+Status: draft, milestones 1 to 7 implemented (branch `draft/initial`). Version stays 0.0.0.
 
 ## Scope
 
@@ -8,7 +8,8 @@ Goal-distance heuristics for classical planning over `sas_plus::Task` (0.2.1):
 
 - delete relaxation: `h_max`, `h_add`, `h_FF` with relaxed plan extraction (milestone 1);
 - red-black partial delete relaxation (`h_RB`);
-- landmarks: LM-cut, landmark count;
+- landmarks: LM-cut, `h^1` and RHW landmarks with disjunctions and reasonable orderings,
+  landmark count, uniform and optimal (LP) cost partitioning, path-dependent tracking;
 - adapters (optional features) for `merge-and-shrink` and `cost-partition`.
 
 Out of scope: search algorithms (`heuristic-search`, `width-search`), grounding (`pddl-rs`),
@@ -190,15 +191,23 @@ variables keep their deletes, the others are relaxed.
   variables. Value = cost of the repaired plan.
 - If a needed path does not exist, the estimate falls back to `h_FF` (`RedBlackPlan::
   is_repaired` is false). So `h_FF <= h_RB` always; dead ends are those of `h_FF`.
-- Not done: painting strategies from the papers (RSE-invertibility, causal-graph DAG
-  orderings), black variables with conditional effects, black derived variables, and
-  semi-relaxed plan repair that reorders the relaxed plan.
+- More paintings: `Painting::causal_graph_level(task, CausalLevel::{Top, Bottom})` paints by
+  longest-path level in the condensed causal graph (sources or sinks first);
+  `Painting::conflict_directed(task, state)` replays the relaxed plan of `state` with real
+  values and paints the variables with the most precondition and goal conflicts. Both follow
+  the ideas of the two papers but are not verified against their exact definitions (no access
+  to the papers' code); both keep the repair's restrictions and use the same greedy
+  independence pass.
+- Not done: the larger tractable fragments of the papers (black variables linked by a DAG of
+  causal-graph arcs with RSE-invertible DTGs), which the repair cannot handle; black variables
+  with conditional effects, black derived variables, and semi-relaxed plan repair that
+  reorders the relaxed plan.
 
-Tests: `h_RB >= h_FF`, same dead ends, `all_red` equals `h_FF`, every repaired plan valid under
-an independent red-black simulator with matching cost; on gripper and courier the location
+Tests (for every painting strategy): `h_RB >= h_FF`, same dead ends, `all_red` equals `h_FF`,
+every repaired plan valid under an independent red-black simulator with matching cost; on gripper and courier the location
 variable is black and `h_RB > h_FF` on some states.
 
-## Landmarks (milestones 4 and 5, partly done)
+## Landmarks (milestones 4 and 5, done)
 
 - Done: `Relaxation::landmarks` computes `h^1` fact landmarks (Zhu & Givan 2003; Keyder,
   Richter & Helmert 2010) per state with a label fixpoint over the rules: state facts are
@@ -215,11 +224,27 @@ variable is black and `h_RB > h_FF` on some states.
 - Tests: every landmark and ordering of every reachable state of random tasks and the fixtures
   is checked by brute force over the state space (no goal, resp. no state with the later
   landmark, is reachable while avoiding the landmark); `UniformLandmarkCost <= h*`.
-- Open: optimal cost partitioning needs an LP solver, and none of the planning crates has one
-  (cost-partition lists an LP baseline as planned). LAMA-style landmark tracking along the
-  search path needs a stateful extension of the trait. Disjunctive and RHW landmarks,
-  reasonable orderings, and LM-cut (repeated `h_max` with justification graphs; reject
-  conditional effects and axioms at first) are not done.
+- Done: `OptimalLandmarkCost` (feature `lp`): the Karpas & Domshlak LP over the pending fact
+  landmarks, solved with `microlp` 0.8 (pure Rust, std only, Rust 1.86; `minilp` is
+  unmaintained, and `good_lp`'s pure-Rust backend is `microlp`). The solution is clamped,
+  scaled to feasibility and rounded up, then maxed with the uniform estimate, so the value is
+  admissible whatever the solver's tolerances. Tests: `uniform <= optimal <= h*`.
+- Done: `Relaxation::rhw_landmarks` (Richter, Helmert & Westphal 2008) into
+  `OrderedLandmarks` (fact-set landmarks, `OrderingKind::{Natural, GreedyNecessary,
+  Reasonable}`): back-chaining over possible first achievers (rules whose conditions are
+  relaxed-reachable without the landmark), shared conditions, per-variable disjunctions of 2 to
+  4 facts, and DTG landmarks. `From<&LandmarkGraph>` converts the `h^1` graph.
+  `add_reasonable_orderings` follows LAMA's approximation with a sound interference test.
+  Tests check every landmark and ordering kind by brute force for both extractions; on the
+  test tasks `h^1` finds 1329 of 1781 brute-force fact landmarks, RHW 1307 (none beyond
+  `h^1`), plus 48 disjunctions.
+- Done: `PathHeuristic` (root / on_expand / merge / estimate) and `LandmarkTracker` with
+  `TrackingMode::Count` (LAMA) and `TrackingMode::UniformCost` (admissible; acceptance
+  without orderings, required-again only from goals and greedy-necessary orderings, merge by
+  intersection). Tests run a reference A* and GBFS.
+- Open: LM-cut with context splitting for conditional effects (it uses `max(sum, h_max)`
+  instead), optimal partitioning over action landmarks (LM-cut's cuts) or the tracked
+  landmarks, `PathHeuristic` in `search-core`.
 
 ## Adapters (done)
 
@@ -419,11 +444,13 @@ the scaling of the indexed closure is not measured here.
    (`benches/relaxation.rs`) against width-search's sweep. Indexed axiom closure in
    the plan replay done. Open: preferred operators, incremental evaluation hooks. Then propose the
    width-search switch.
-3. Red-black `h_RB` (greedy painting, plan repair), **done**.
+3. Red-black `h_RB` (greedy, causal-graph-level and conflict-directed painting, plan repair),
+   **done**.
 4. LM-cut, **done** (`src/lm_cut.rs`): `h_max` from scratch per round, operator-level
    costs over effect rules, `max(sum, h_max)` with conditional effects.
-5. Landmarks: `h^1` landmarks, landmark count and uniform cost partitioning **done** (per
-   state); optimal partitioning and path-dependent tracking open.
+5. Landmarks: `h^1` and RHW landmarks, disjunctive landmarks, reasonable orderings, landmark
+   count, uniform and optimal (LP, feature `lp`) cost partitioning, path-dependent tracking
+   (`PathHeuristic`, `LandmarkTracker`), **done**.
 6. Adapters: abstraction heuristics, `merge-and-shrink`, `cost-partition` features, **done**.
 7. Switch to the shared trait from `search-core`, **done** (feature adapters via `Adapter`).
 
@@ -440,6 +467,13 @@ the scaling of the indexed closure is not measured here.
 - M. Katz, J. Hoffmann, C. Domshlak. Who said we need to relax all variables? ICAPS 2013.
 - C. Domshlak, J. Hoffmann, M. Katz. Red-black planning: a new systematic approach to partial
   delete relaxation. AIJ 221, 2015.
+- E. Karpas, C. Domshlak. Cost-optimal planning with landmarks. IJCAI 2009. (uniform and
+  optimal cost partitioning, multi-path acceptance)
+- S. Richter, M. Helmert, M. Westphal. Landmarks revisited. AAAI 2008. (RHW landmarks)
+- J. Hoffmann, J. Porteous, L. Sebastia. Ordered landmarks in planning. JAIR 22, 2004.
+  (reasonable orderings)
+- L. Zhu, R. Givan. Landmark extraction via planning graph propagation. ICAPS doctoral
+  consortium 2003. (`h^1` labels)
 - G. Röger, F. Pommerening, M. Helmert. Optimal planning in the presence of conditional
   effects: extending LM-Cut with context splitting. ECAI 2014.
 - M. Helmert. The Fast Downward planning system. JAIR 26, 2006. (axioms, SAS+ format)
