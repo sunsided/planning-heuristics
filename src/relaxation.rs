@@ -12,6 +12,7 @@
 
 mod exploration;
 mod plan;
+mod queue;
 mod workspace;
 
 use alloc::vec::Vec;
@@ -22,6 +23,7 @@ use sas_plus::{Fact, OpId, Task};
 pub use exploration::{Combine, Exploration};
 pub use plan::RelaxedPlan;
 pub(crate) use workspace::Workspace;
+use workspace::{FactSlot, RuleSlot};
 
 /// The delete relaxation of a task, indexed for the worklist in [`Relaxation::explore`].
 ///
@@ -30,7 +32,7 @@ pub(crate) use workspace::Workspace;
 #[derive(Clone, Debug)]
 pub struct Relaxation {
     /// Fact id of `var = 0` for each variable.
-    offsets: Vec<usize>,
+    offsets: Vec<u32>,
     /// Total number of facts, the sum of all domain sizes.
     num_facts: usize,
     /// All rules: first the operator effects grouped by operator (see
@@ -41,16 +43,23 @@ pub struct Relaxation {
     /// One flat array instead of a vector per fact keeps the hot loop cache-friendly.
     watcher_starts: Vec<usize>,
     /// The concatenated watcher lists of all facts; see [`Relaxation::watcher_starts`].
-    watcher_rules: Vec<usize>,
-    /// Number of conditions of each rule, the initial value of the worklist counters.
-    condition_counts: Vec<usize>,
+    watcher_rules: Vec<u32>,
+    /// The worklist state of each rule before any condition is closed, with its head and
+    /// cost packed alongside the counters for the inner loop; copied into the workspace in
+    /// one go per evaluation.
+    rule_init: Vec<RuleSlot>,
+    /// [`FactSlot::UNREACHED`] once per fact, the template the workspace copies per
+    /// evaluation.
+    fact_init: Vec<FactSlot>,
+    /// The rules without conditions, which the worklist must offer up front.
+    unconditioned: Vec<u32>,
     /// For each operator, the range of its rules in [`Relaxation::rules`]. Empty for an
     /// operator without effects.
     op_rules: Vec<Range<usize>>,
     /// Index of the first axiom rule; all rules before it belong to operators.
     first_axiom: usize,
     /// Facts that hold in every relaxed state: the defaults of the derived variables.
-    free: Vec<usize>,
+    free: Vec<u32>,
     /// The goal facts, sorted ascending without duplicates.
     goal: Vec<usize>,
     /// Whether each fact is a goal fact.
@@ -77,12 +86,14 @@ impl Relaxation {
     ///
     /// # Panics
     ///
-    /// Panics if a fact of `task` refers to an unknown variable.
+    /// Panics if a fact of `task` refers to an unknown variable, or if the task has `2³²` or
+    /// more facts or rules (ids are stored as `u32`).
     #[must_use]
     pub fn new(task: &Task) -> Self {
         let offsets = fact_offsets(task);
         let num_facts = task.variables.iter().map(|v| v.domain_size as usize).sum();
-        let id = |f: &Fact| offsets[f.var] + f.value as usize;
+        assert!(u32::try_from(num_facts).is_ok(), "fewer than 2^32 facts");
+        let id = |f: &Fact| (offsets[f.var] + f.value) as usize;
 
         let (mut rules, op_rules) = operator_rules(task, &id);
         let first_axiom = rules.len();
@@ -95,7 +106,7 @@ impl Relaxation {
 
         let free = (0..task.num_variables())
             .filter(|&var| task.variables[var].is_derived())
-            .map(|var| offsets[var] + task.initial.0[var] as usize)
+            .map(|var| offsets[var] + task.initial.0[var])
             .collect();
         let goal = sorted_ids(task.goal.iter().map(id));
         let mut is_goal = alloc::vec![false; num_facts];
@@ -104,7 +115,7 @@ impl Relaxation {
         }
 
         let (watcher_starts, watcher_rules) = watchers(&rules, num_facts);
-        let condition_counts = rules.iter().map(|r| r.conditions.len()).collect();
+        let (rule_init, unconditioned) = worklist_tables(&rules);
 
         Self {
             offsets,
@@ -112,7 +123,9 @@ impl Relaxation {
             rules,
             watcher_starts,
             watcher_rules,
-            condition_counts,
+            rule_init,
+            fact_init: alloc::vec![FactSlot::UNREACHED; num_facts],
+            unconditioned,
             op_rules,
             first_axiom,
             free,
@@ -134,20 +147,25 @@ impl Relaxation {
     /// Panics if `fact.var` is not a variable of the task.
     #[must_use]
     pub fn fact_id(&self, fact: Fact) -> usize {
-        self.offsets[fact.var] + fact.value as usize
+        (self.offsets[fact.var] + fact.value) as usize
     }
 
     /// The fact ids true in `state`, one per variable, in variable order.
-    fn state_facts<'s>(&'s self, state: &'s sas_plus::State) -> impl Iterator<Item = usize> + 's {
+    fn state_facts<'s>(&'s self, state: &'s sas_plus::State) -> impl Iterator<Item = u32> + 's {
         state
             .0
             .iter()
             .zip(&self.offsets)
-            .map(|(&value, &offset)| offset + value as usize)
+            .map(|(&value, &offset)| offset + value)
+    }
+
+    /// The facts true in every relaxed state from `state`: its own facts and the free facts.
+    fn start_facts<'s>(&'s self, state: &'s sas_plus::State) -> impl Iterator<Item = u32> + 's {
+        self.state_facts(state).chain(self.free.iter().copied())
     }
 
     /// The rules that have `fact` as a condition, in ascending rule order.
-    fn watchers(&self, fact: usize) -> &[usize] {
+    fn watchers(&self, fact: usize) -> &[u32] {
         &self.watcher_rules[self.watcher_starts[fact]..self.watcher_starts[fact + 1]]
     }
 
@@ -158,13 +176,17 @@ impl Relaxation {
 }
 
 /// Fact id of `var = 0` for each variable of `task`.
-fn fact_offsets(task: &Task) -> Vec<usize> {
+///
+/// # Panics
+///
+/// Panics if the task has `2³²` or more facts.
+fn fact_offsets(task: &Task) -> Vec<u32> {
     task.variables
         .iter()
         .scan(0, |next, v| {
             let offset = *next;
             *next += v.domain_size as usize;
-            Some(offset)
+            Some(to_u32(offset))
         })
         .collect()
 }
@@ -198,7 +220,7 @@ fn sorted_ids(ids: impl Iterator<Item = usize>) -> Vec<usize> {
 
 /// For each of the `num_facts` facts, the rules that have it as a condition, as offsets
 /// (`num_facts + 1` entries) into one flat array of rule indices.
-fn watchers(rules: &[Rule], num_facts: usize) -> (Vec<usize>, Vec<usize>) {
+fn watchers(rules: &[Rule], num_facts: usize) -> (Vec<usize>, Vec<u32>) {
     let mut starts = alloc::vec![0; num_facts + 1];
     for rule in rules {
         for &c in &rule.conditions {
@@ -214,10 +236,39 @@ fn watchers(rules: &[Rule], num_facts: usize) -> (Vec<usize>, Vec<usize>) {
     let mut flat = alloc::vec![0; starts[num_facts]];
     for (r, rule) in rules.iter().enumerate() {
         for &c in &rule.conditions {
-            flat[next[c]] = r;
+            flat[next[c]] = to_u32(r);
             next[c] += 1;
         }
     }
 
     (starts, flat)
+}
+
+/// The packed per-rule worklist state before any condition is closed, and the rules
+/// without conditions.
+fn worklist_tables(rules: &[Rule]) -> (Vec<RuleSlot>, Vec<u32>) {
+    let rule_init = rules
+        .iter()
+        .map(|r| RuleSlot {
+            unsatisfied: to_u32(r.conditions.len()),
+            head: to_u32(r.head),
+            cost: u32::try_from(r.cost).expect("rule costs come from u32 operator costs"),
+            accumulated: 0,
+        })
+        .collect();
+    let unconditioned = (0..rules.len())
+        .filter(|&r| rules[r].conditions.is_empty())
+        .map(to_u32)
+        .collect();
+
+    (rule_init, unconditioned)
+}
+
+/// Converts a fact or rule id to the `u32` the worklist stores.
+///
+/// # Panics
+///
+/// Panics if `id` does not fit, i.e. the task has `2³²` or more facts or rules.
+fn to_u32(id: usize) -> u32 {
+    u32::try_from(id).expect("fewer than 2^32 facts and rules")
 }

@@ -7,18 +7,18 @@
 //!
 //! ```mermaid
 //! graph LR
-//!     seed["seed: state facts, free facts, rules without conditions"] --> heap
-//!     heap["heap ordered by (cost, fact id)"] -->|pop lowest| close["close fact"]
+//!     seed["seed: state facts, free facts, rules without conditions"] --> queue
+//!     queue["queue: buckets by cost, heap for large costs"] -->|pop lowest| close["close fact"]
 //!     close -->|"decrement counters of watching rules"| rule["rule with all conditions closed"]
-//!     rule -->|"offer head: combine(conditions) + rule cost"| heap
+//!     rule -->|"offer head: combine(conditions) + rule cost"| queue
 //! ```
 
 use alloc::vec::Vec;
-use core::cmp::Reverse;
-use core::mem;
 
 use sas_plus::State;
 
+use super::queue::Queue;
+use super::workspace::{FactSlot, NO_RULE};
 use super::{Relaxation, Workspace};
 
 /// How a rule combines the costs of its conditions.
@@ -77,11 +77,12 @@ impl Relaxation {
     /// `state` must have its derived variables evaluated (as returned by
     /// [`sas_plus::Task::initial_state`] or [`sas_plus::Task::apply`]).
     ///
-    /// Runs in `O((facts + rule conditions) · log facts)` and allocates its working memory.
-    /// Ties are broken towards the lower fact id, and a fact keeps the first rule that offered
-    /// it its final cost, so results are deterministic. The heuristics ([`crate::HMax`],
-    /// [`crate::HAdd`], [`crate::HFf`]) reuse their memory and stop once the goal is
-    /// settled; use them when only the goal cost is needed.
+    /// Runs in `O(facts + rule conditions)` plus the queue: `O(1)` amortized per fact for costs
+    /// below 1024, `O(log facts)` above. Allocates its working memory. Ties are broken in a
+    /// fixed queue order and a fact keeps the first rule that offered it its final cost, so
+    /// results are deterministic. The heuristics ([`crate::HMax`], [`crate::HAdd`],
+    /// [`crate::HFf`]) reuse their memory and stop once the goal is settled; use them when
+    /// only the goal cost is needed.
     ///
     /// # Panics
     ///
@@ -92,7 +93,7 @@ impl Relaxation {
         let goal_cost = self.run(state, combine, &mut workspace, false);
 
         Exploration {
-            cost: mem::take(&mut workspace.cost),
+            cost: workspace.facts.iter().map(|slot| slot.cost()).collect(),
             goal_cost,
         }
     }
@@ -118,100 +119,173 @@ impl Relaxation {
         stop_at_goal: bool,
     ) -> Option<u64> {
         workspace.reset(self);
-        let mut run = Run {
-            relaxation: self,
-            combine,
-            ws: workspace,
-        };
-        run.seed(state);
-        run.drain(stop_at_goal);
-
-        run.goal_cost()
+        match combine {
+            Combine::Max => Run::<false>::new(self, workspace).complete(state, stop_at_goal),
+            Combine::Add => Run::<true>::new(self, workspace).complete(state, stop_at_goal),
+        }
     }
 }
 
-/// One [`Relaxation::run`] over the buffers of a [`Workspace`].
-struct Run<'a> {
+/// One [`Relaxation::run`] over the buffers of a [`Workspace`]; `ADD` selects
+/// [`Combine::Add`] over [`Combine::Max`] at compile time, keeping the inner loop branch-free.
+struct Run<'a, const ADD: bool> {
     /// The relaxation being explored.
     relaxation: &'a Relaxation,
-    /// How rules combine their condition costs.
-    combine: Combine,
     /// The working memory, reset for this run.
     ws: &'a mut Workspace,
+    /// Number of goal facts not closed yet.
+    open_goals: usize,
 }
 
-impl Run<'_> {
-    /// Offers cost 0 to the facts of `state` and the free facts, then lets every rule
-    /// without conditions offer its head.
+impl<'a, const ADD: bool> Run<'a, ADD> {
+    /// A run over the freshly reset `ws`.
+    fn new(relaxation: &'a Relaxation, ws: &'a mut Workspace) -> Self {
+        Self {
+            relaxation,
+            ws,
+            open_goals: relaxation.goal.len(),
+        }
+    }
+
+    /// Seeds and drains; returns the combined goal cost.
+    fn complete(mut self, state: &State, stop_at_goal: bool) -> Option<u64> {
+        self.seed(state);
+        self.drain(stop_at_goal);
+
+        self.goal_cost()
+    }
+
+    /// The [`Combine`] this run uses.
+    const COMBINE: Combine = if ADD { Combine::Add } else { Combine::Max };
+
+    /// Closes the facts of `state` and the free facts at cost 0, lets them trigger their
+    /// watchers, then lets every rule without conditions offer its head.
+    ///
+    /// Closing the cost-0 start facts directly is what popping them first would do, minus the
+    /// queue traffic; on small tasks that traffic dominates an evaluation.
     fn seed(&mut self, state: &State) {
         let relaxation = self.relaxation;
-        for fact in relaxation
-            .state_facts(state)
-            .chain(relaxation.free.iter().copied())
-        {
-            self.offer(fact, 0, None);
+        for fact in relaxation.state_facts(state) {
+            self.close_at_zero(fact);
+        }
+
+        for &fact in &relaxation.free {
+            self.close_at_zero(fact);
+        }
+
+        let facts = &self.ws.facts;
+        self.open_goals = relaxation
+            .goal
+            .iter()
+            .filter(|&&g| !facts[g].closed)
+            .count();
+
+        // All start facts are closed before any rule fires, so none gets a supporter.
+        for i in 0..self.ws.order.len() {
+            self.trigger_watchers(self.ws.order[i] as usize, 0);
         }
 
         // Rules without conditions are never triggered by a closing fact.
-        for (r, rule) in relaxation.rules.iter().enumerate() {
-            if rule.conditions.is_empty() {
-                self.offer(rule.head, rule.cost, Some(r));
-            }
+        for &r in &relaxation.unconditioned {
+            let rule = self.ws.rules[r as usize];
+            self.offer(rule.head, u64::from(rule.cost), r);
         }
     }
 
-    /// Closes facts in cost order until the heap is empty or, with `stop_at_goal`, until
+    /// Closes the start fact `fact` with cost 0 and no supporter, unless it already is.
+    #[inline]
+    fn close_at_zero(&mut self, fact: u32) {
+        let slot = &mut self.ws.facts[fact as usize];
+        if slot.closed {
+            return;
+        }
+
+        *slot = FactSlot {
+            cost: 0,
+            supporter: NO_RULE,
+            reached: true,
+            closed: true,
+        };
+        self.ws.order.push(fact);
+    }
+
+    /// Closes facts in cost order until the queue is empty or, with `stop_at_goal`, until
     /// every goal fact is closed.
     fn drain(&mut self, stop_at_goal: bool) {
-        let mut open_goals = self.relaxation.goal.len();
-        while !(stop_at_goal && open_goals == 0) {
-            let Some(Reverse((cost, fact))) = self.ws.heap.pop() else {
+        while !(stop_at_goal && self.open_goals == 0) {
+            let Some((cost, fact)) = self.ws.queue.pop() else {
                 break;
             };
-            if self.ws.closed[fact] {
+            let slot = &mut self.ws.facts[fact as usize];
+            if slot.closed {
                 continue;
             }
 
-            self.ws.closed[fact] = true;
+            slot.closed = true;
             self.ws.order.push(fact);
-            if self.relaxation.is_goal[fact] {
-                open_goals -= 1;
+            if self.relaxation.is_goal[fact as usize] {
+                self.open_goals -= 1;
             }
 
-            self.trigger_watchers(fact, cost);
+            self.trigger_watchers(fact as usize, cost);
         }
     }
 
     /// Records the closed `fact` with `cost` in every rule that waits for it, and fires the
     /// rules whose last condition this was.
+    #[inline]
     fn trigger_watchers(&mut self, fact: usize, cost: u64) {
-        let relaxation = self.relaxation;
-        for &r in relaxation.watchers(fact) {
-            self.ws.accumulated[r] = self.combine.apply(self.ws.accumulated[r], cost);
-            self.ws.unsatisfied[r] -= 1;
-            if self.ws.unsatisfied[r] == 0 {
-                let rule = &relaxation.rules[r];
-                let total = self.ws.accumulated[r].saturating_add(rule.cost);
-                self.offer(rule.head, total, Some(r));
+        let Workspace {
+            facts,
+            rules,
+            queue,
+            ..
+        } = &mut *self.ws;
+        for &r in self.relaxation.watchers(fact) {
+            let slot = &mut rules[r as usize];
+            slot.accumulated = Self::COMBINE.apply(slot.accumulated, cost);
+            slot.unsatisfied -= 1;
+            if slot.unsatisfied == 0 {
+                let total = slot.accumulated.saturating_add(u64::from(slot.cost));
+                offer(facts, queue, slot.head, total, r);
             }
         }
     }
 
-    /// Lowers the cost of `fact` to `cost` via `supporter` if that is strictly cheaper.
-    fn offer(&mut self, fact: usize, cost: u64, supporter: Option<usize>) {
-        if self.ws.cost[fact].is_none_or(|old| cost < old) {
-            self.ws.cost[fact] = Some(cost);
-            self.ws.supporter[fact] = supporter;
-            self.ws.heap.push(Reverse((cost, fact)));
-        }
+    /// Lowers the cost of `fact` to `cost` via rule `supporter` ([`NO_RULE`] for none) if
+    /// that is strictly cheaper; see [`offer`].
+    fn offer(&mut self, fact: u32, cost: u64, supporter: u32) {
+        offer(
+            &mut self.ws.facts,
+            &mut self.ws.queue,
+            fact,
+            cost,
+            supporter,
+        );
     }
 
     /// Combines the goal fact costs; `None` if one is unreachable.
     fn goal_cost(&self) -> Option<u64> {
-        let combine = self.combine;
-        self.relaxation
-            .goal
-            .iter()
-            .try_fold(0, |acc, &g| self.ws.cost[g].map(|c| combine.apply(acc, c)))
+        let combine = Self::COMBINE;
+        self.relaxation.goal.iter().try_fold(0, |acc, &g| {
+            self.ws.facts[g].cost().map(|c| combine.apply(acc, c))
+        })
+    }
+}
+
+/// Lowers the cost of `fact` in `facts` to `cost` via rule `supporter` ([`NO_RULE`] for none)
+/// if that is strictly cheaper, and queues it. A free function so the caller can keep other
+/// workspace fields borrowed.
+#[inline]
+fn offer(facts: &mut [FactSlot], queue: &mut Queue, fact: u32, cost: u64, supporter: u32) {
+    let slot = &mut facts[fact as usize];
+    if !slot.reached || cost < slot.cost {
+        *slot = FactSlot {
+            cost,
+            supporter,
+            reached: true,
+            closed: false,
+        };
+        queue.push(cost, fact);
     }
 }

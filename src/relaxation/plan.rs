@@ -93,7 +93,7 @@ impl Relaxation {
                 continue;
             }
 
-            if let Some(r) = ws.supporter[fact] {
+            if let Some(r) = ws.facts[fact].supporter() {
                 ws.marked[r] = true;
                 ws.stack.extend_from_slice(&self.rules[r].conditions);
             }
@@ -108,7 +108,8 @@ impl Relaxation {
         ws.plan.clear();
         let mut cost = 0_u64;
         for i in 0..ws.order.len() {
-            let Some(r) = ws.supporter[ws.order[i]].filter(|&r| ws.marked[r]) else {
+            let fact = ws.order[i] as usize;
+            let Some(r) = ws.facts[fact].supporter().filter(|&r| ws.marked[r]) else {
                 continue;
             };
             let rule = &self.rules[r];
@@ -135,8 +136,8 @@ impl Relaxation {
     /// axioms.
     fn relaxed_state(&self, state: &State, ws: &mut Workspace) {
         refill(&mut ws.reached, self.num_facts, false);
-        for fact in self.state_facts(state).chain(self.free.iter().copied()) {
-            ws.reached[fact] = true;
+        for fact in self.start_facts(state) {
+            ws.reached[fact as usize] = true;
         }
 
         self.close_axioms(&mut ws.reached);
