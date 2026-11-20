@@ -7,12 +7,19 @@
 //! - [`HMax`], [`HAdd`] and [`HFf`]: the delete-relaxation heuristics `h_max`, `h_add` and
 //!   `h_FF` (Bonet & Geffner 2001, Hoffmann & Nebel 2001), computed with a worklist
 //!   (generalized Dijkstra) over [`Relaxation`], which also extracts [`RelaxedPlan`]s.
+//! - [`RedBlack`]: the red-black heuristic `h_RB` by relaxed plan repair (Domshlak, Hoffmann &
+//!   Katz 2015), with the black variables chosen by a [`Painting`].
+//! - [`Relaxation::landmarks`]: `h^1` fact landmarks with natural orderings
+//!   ([`LandmarkGraph`]), and the heuristics [`LandmarkCount`] (inadmissible) and
+//!   [`UniformLandmarkCost`] (admissible, uniform cost partitioning).
+//! - [`AbstractionHeuristic`]: goal distances of any [`sas_plus::Abstraction`], such as a
+//!   pattern database over a [`sas_plus::Projection`]. Features `merge-and-shrink` and
+//!   `cost-partition` implement [`Heuristic`] for those crates' heuristics.
 //!
 //! ## Planned
 //!
-//! - Red-black partial delete relaxation
-//! - Landmark heuristics (LM-cut, landmark count)
-//! - Adapters for merge-and-shrink and cost-partition abstractions
+//! - LM-cut, optimal landmark cost partitioning, landmark tracking along the search path
+//! - Preferred operators
 //!
 //! See `docs/design.md` in the repository for the design and the milestones.
 //!
@@ -142,4 +149,5 @@ const _: () = {
     send::<LandmarkCount<'static>>();
     send::<UniformLandmarkCost<'static>>();
     send::<RedBlack<'static>>();
+    send::<AbstractionHeuristic<sas_plus::Projection>>();
 };

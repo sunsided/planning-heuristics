@@ -172,52 +172,66 @@ contradicting its own precondition can never fire). Keeping them is sound, only 
 Supported, not rejected: each effect is its own rule with precondition ∪ conditions, and the
 replay handles repeated operators as above.
 
-## Red-black (outline, milestone 3)
+## Red-black (milestone 3, done)
 
-`h_RB` (Katz, Hoffmann & Domshlak 2013; Domshlak, Hoffmann & Katz 2015): some variables
-("black") keep their deletes, the others ("red") are relaxed.
+`RedBlack` (`h_RB`; Katz, Hoffmann & Domshlak 2013; Domshlak, Hoffmann & Katz 2015): black
+variables keep their deletes, the others are relaxed.
 
-- Painting: start with all red; paint black variables of the causal graph chosen by a
-  strategy (e.g. invertible / RSE-invertible root variables, smallest domains), keeping the
-  black causal graph free of arcs between black variables (needs `sas_plus::CausalGraph` and,
-  for some strategies, its SCCs).
-- Plan repair: compute the relaxed plan as in `h_FF`, then repair it: for each black variable,
-  insert DTG paths that move it to the values the red plan needs, in order (the "red-black plan
-  repair" of Domshlak et al. 2015; polynomial for DAG black causal graphs with invertible DTGs).
-- Value = cost of the repaired plan; dead end if the relaxed part is a dead end.
-- Reuses: `Relaxation`, best supporters, `RelaxedPlan`. Needs: DTGs per variable (build here or
-  in sas-plus).
-- Restriction for a first version: no conditional effects on black variables, no derived
-  black variables (reject with an error at construction).
+- Painting: black variables must be state variables outside axioms and conditional effects
+  (as condition or effect), pairwise unlinked in `sas_plus::CausalGraph`. Then an operator
+  changes at most one black variable and has no precondition on another, so paths for
+  different black variables never interfere. `Painting::greedy` paints the eligible variables
+  with strongly connected DTGs, smallest domain first; `Painting::new` validates a given set
+  and reports `PaintingError`; `Painting::all_red` gives `h_FF`.
+- Plan repair: execute the `h_FF` relaxed plan under red-black semantics (red facts
+  accumulate, each black variable has one value). Before each operator, move every black
+  variable whose precondition value differs along a cheapest DTG path (Dijkstra over its
+  values) using transitions whose red preconditions hold; at the end move the black goal
+  variables. Value = cost of the repaired plan.
+- If a needed path does not exist, the estimate falls back to `h_FF` (`RedBlackPlan::
+  is_repaired` is false). So `h_FF <= h_RB` always; dead ends are those of `h_FF`.
+- Not done: painting strategies from the papers (RSE-invertibility, causal-graph DAG
+  orderings), black variables with conditional effects, black derived variables, and
+  semi-relaxed plan repair that reorders the relaxed plan.
 
-## Landmarks (outline, milestones 4 and 5)
+Tests: `h_RB >= h_FF`, same dead ends, `all_red` equals `h_FF`, every repaired plan valid under
+an independent red-black simulator with matching cost; on gripper and courier the location
+variable is black and `h_RB > h_FF` on some states.
 
-- LM-cut (Helmert & Domshlak 2009): repeated `h_max` with justification graphs. Needs a
-  variant of the worklist on unary operator rules with per-rule mutable costs, recomputed
-  incrementally after each cut. Reuses `Relaxation` with a cost vector override
-  (`explore_with_costs(state, combine, &[u64])`). Conditional effects are open: splitting each
-  effect into a unary operator is not enough (it can undercut `h_max`, as the `o: a; a ⇒ b`
-  example shows); it needs context splitting (Röger, Pommerening & Helmert 2014), so reject
-  conditional effects and axioms at first, as Fast Downward does for axioms.
-- Landmark count (Richter & Westphal 2010, `h_LM`): a landmark graph from RHW or `h^m`
-  landmarks, plus per-path accepted/required sets. Needs search-path state (the accepted set
-  per node), so it does not fit `Heuristic<S, C>` alone; it will need a stateful extension
-  (`fn notify(&mut self, parent, op, child)` or a state wrapper). Admissible variant via
-  cost partitioning over landmarks, which links to `cost-partition`.
+## Landmarks (milestones 4 and 5, partly done)
 
-## Adapters (optional features)
+- Done: `Relaxation::landmarks` computes `h^1` fact landmarks (Zhu & Givan 2003; Keyder,
+  Richter & Helmert 2010) per state with a label fixpoint over the rules: state facts are
+  labelled with themselves, a rule offers its head plus the union of its condition labels, and
+  a head's label is the intersection of its offers. Landmarks are the goal facts plus the union
+  of their labels; a fact in a landmark's label gives a natural ordering (holds at or before the
+  first state where the landmark holds). Derived defaults outside the state get the empty
+  label (they only hold once the axioms stop firing). Labels are `facts²` bits.
+- Done: `LandmarkCount` (landmarks of the state not true in it; inadmissible) and
+  `UniformLandmarkCost` (Karpas & Domshlak 2009: each operator's cost split evenly among the
+  pending landmarks it adds, each landmark worth its cheapest share; admissible). Both recompute
+  the landmarks per state, so they fit the stateless `Heuristic` trait. The `f64` sum is
+  rounded up after a relative tolerance of `1e-9`.
+- Tests: every landmark and ordering of every reachable state of random tasks and the fixtures
+  is checked by brute force over the state space (no goal, resp. no state with the later
+  landmark, is reachable while avoiding the landmark); `UniformLandmarkCost <= h*`.
+- Open: optimal cost partitioning needs an LP solver, and none of the planning crates has one
+  (cost-partition lists an LP baseline as planned). LAMA-style landmark tracking along the
+  search path needs a stateful extension of the trait. Disjunctive and RHW landmarks,
+  reasonable orderings, and LM-cut (repeated `h_max` with justification graphs; reject
+  conditional effects and axioms at first) are not done.
 
+## Adapters (done)
+
+- `AbstractionHeuristic<A: sas_plus::Abstraction>`: goal distances under given costs (a cost
+  partition's share or `Task::costs`), looked up per state; `projection(task, pattern)` builds a
+  pattern database. `None` for abstract dead ends and pruned states.
 - Feature `merge-and-shrink`: `impl Heuristic<State> for MergeAndShrinkHeuristic` (legal while
-  the trait is local), saturating its `value(&State) -> Option<u64>` to `u32`.
-  At milestone 7, when the trait comes from heuristic-search, this impl becomes an
-  orphan; switch to a wrapper type then (or rely on the shared trait's blanket impl for
-  `Fn(&S) -> Option<C>`: `|s| mas.value(s)`). `None` means dead end or pruned; the heuristic must
-  be built with `prune: false` for arbitrary states, since a pruned unreachable state is not a
-  dead end. Waits for merge-and-shrink 0.3.0.
-- Feature `cost-partition`: same pattern over its heuristic type (saturated cost partitioning,
-  max-over-orders), plus feeding it landmark and relaxation-based components later.
-- A generic adapter over `sas_plus::Abstraction` (abstract goal distances on the LTS) may cover
-  both if they keep implementing that trait.
+  the trait is local; becomes an orphan at milestone 7, then switch to a wrapper or the shared
+  trait's closure impl). Build with `prune: false` for arbitrary states.
+- Feature `cost-partition`: the same for `CostPartitionedHeuristic` and `MaxOverOrders`.
+- Both are path dependencies on unreleased versions (merge-and-shrink 0.3.0, cost-partition
+  0.2.0) and must be published before this crate.
 
 All adapters are dashed edges in `plan/architecture.md`: never required dependencies.
 
@@ -262,12 +276,14 @@ regression). It can switch only after it grounds to `sas_plus::Task` (roadmap op
 - **width-search**: release `SasProblem::h_add` (local branch `feature/public-h-add`) so the
   comparison test can run in CI. Its `h_add` sums duplicated rule conditions twice and lacks
   free derived defaults (see Testing); both go away when it switches to this crate.
-- **sas-plus**: none required. Nice to have: SCCs on `CausalGraph` and DTGs (red-black),
+- **sas-plus**: none required. Nice to have: DTGs (red-black builds its own),
   indexed axiom evaluation (would replace the `close_axioms` rescans here).
 - **heuristic-search**: publish the `Heuristic<S, C>` trait (or extract `search-core`), then this
   crate re-exports it.
-- **merge-and-shrink**: 0.3.0 with `MergeAndShrinkHeuristic::value` published before the
-  adapter feature lands.
+- **merge-and-shrink**: publish 0.3.0 (`MergeAndShrinkHeuristic::value`); the
+  `merge-and-shrink` feature uses it as a path dependency until then.
+- **cost-partition**: publish 0.2.0 (`MaxOverOrders`) for the `cost-partition` feature; an LP
+  solver (its planned optimal baseline) would enable optimal landmark cost partitioning here.
 
 ## Testing strategy
 
@@ -394,10 +410,11 @@ the scaling of the indexed closure is not measured here.
    (`benches/relaxation.rs`) against width-search's sweep. Indexed axiom closure in
    the plan replay done. Open: preferred operators, incremental evaluation hooks. Then propose the
    width-search switch.
-3. Red-black `h_RB` (painting strategies, plan repair).
-4. LM-cut.
-5. Landmark count (needs the stateful extension).
-6. Adapters: `merge-and-shrink`, `cost-partition` features.
+3. Red-black `h_RB` (greedy painting, plan repair), **done**.
+4. LM-cut. Open.
+5. Landmarks: `h^1` landmarks, landmark count and uniform cost partitioning **done** (per
+   state); optimal partitioning and path-dependent tracking open.
+6. Adapters: abstraction heuristics, `merge-and-shrink`, `cost-partition` features, **done**.
 7. Switch to the shared trait from `heuristic-search` / `search-core`.
 
 ## References
