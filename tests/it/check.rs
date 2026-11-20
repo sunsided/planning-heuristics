@@ -35,6 +35,12 @@ pub fn check_task(name: &str, task: &Task) -> usize {
             "h_add, {}",
             ctx()
         );
+        assert_eq!(
+            add,
+            h_add.relaxation().explore(state, Combine::Add).goal_cost(),
+            "early stop changes h_add, {}",
+            ctx()
+        );
         assert_eq!(max.is_none(), add.is_none(), "dead ends, {}", ctx());
         assert_eq!(max.is_none(), ff.is_none(), "dead ends, {}", ctx());
         assert_eq!(h_ff.estimate(state), ff.map(|v| u32::try_from(v).unwrap()));
@@ -57,10 +63,13 @@ pub fn check_task(name: &str, task: &Task) -> usize {
             "h_max {max}, h_FF {ff}, h_add {add}, {}",
             ctx()
         );
-        let plan = h_ff
-            .relaxation()
-            .relaxed_plan(state)
-            .expect("not a dead end");
+        let plan = h_ff.relaxed_plan(state).expect("not a dead end");
+        assert_eq!(
+            Some(&plan),
+            h_ff.relaxation().relaxed_plan(state).as_ref(),
+            "reused and fresh workspaces disagree, {}",
+            ctx()
+        );
         assert!(
             oracle::is_relaxed_plan(task, state, plan.ops()),
             "invalid relaxed plan, {}",

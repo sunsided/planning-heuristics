@@ -13,14 +13,13 @@
 //!     rule -->|"offer head: combine(conditions) + rule cost"| heap
 //! ```
 
-use alloc::collections::BinaryHeap;
-use alloc::vec;
 use alloc::vec::Vec;
 use core::cmp::Reverse;
+use core::mem;
 
 use sas_plus::State;
 
-use super::Relaxation;
+use super::{Relaxation, Workspace};
 
 /// How a rule combines the costs of its conditions.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -47,12 +46,6 @@ impl Combine {
 pub struct Exploration {
     /// Relaxed cost of each fact; `None` if the fact is unreachable even without deletes.
     cost: Vec<Option<u64>>,
-    /// The rule that first offered each fact its final cost; `None` for facts true in the
-    /// state, free facts and unreachable facts. Ties keep the first offer.
-    supporter: Vec<Option<usize>>,
-    /// The reachable facts in the order they were closed. Every rule's conditions are
-    /// closed before its head when the rule supports that head.
-    order: Vec<usize>,
     /// The combined cost of the goal facts; `None` if one is unreachable.
     goal_cost: Option<u64>,
 }
@@ -75,16 +68,6 @@ impl Exploration {
     pub fn cost(&self, fact: usize) -> Option<u64> {
         self.cost[fact]
     }
-
-    /// The rule that achieves `fact` most cheaply; `None` for facts that need no rule.
-    pub(super) fn supporter(&self, fact: usize) -> Option<usize> {
-        self.supporter[fact]
-    }
-
-    /// The reachable facts in the order they were closed.
-    pub(super) fn order(&self) -> &[usize] {
-        &self.order
-    }
 }
 
 impl Relaxation {
@@ -94,67 +77,70 @@ impl Relaxation {
     /// `state` must have its derived variables evaluated (as returned by
     /// [`sas_plus::Task::initial_state`] or [`sas_plus::Task::apply`]).
     ///
-    /// Runs in `O((facts + rule conditions) · log facts)`. Ties are broken towards the lower
-    /// fact id, and a fact keeps the first rule that offered it its final cost, so results are
-    /// deterministic.
+    /// Runs in `O((facts + rule conditions) · log facts)` and allocates its working memory.
+    /// Ties are broken towards the lower fact id, and a fact keeps the first rule that offered
+    /// it its final cost, so results are deterministic. The heuristics ([`crate::HMax`],
+    /// [`crate::HAdd`], [`crate::HFf`]) reuse their memory and stop once the goal is
+    /// settled; use them when only the goal cost is needed.
     ///
     /// # Panics
     ///
     /// Panics if `state` has fewer values than the task has variables.
     #[must_use]
     pub fn explore(&self, state: &State, combine: Combine) -> Exploration {
-        let mut run = Run::new(self, combine);
-        run.seed(state);
-        run.drain();
+        let mut workspace = Workspace::default();
+        let goal_cost = self.run(state, combine, &mut workspace, false);
 
-        run.finish()
+        Exploration {
+            cost: mem::take(&mut workspace.cost),
+            goal_cost,
+        }
+    }
+
+    /// The combined goal cost from `state`, stopping as soon as every goal fact is closed.
+    /// Leaves the supporters and closing order of the closed facts in `workspace`.
+    pub(crate) fn goal_cost_in(
+        &self,
+        state: &State,
+        combine: Combine,
+        workspace: &mut Workspace,
+    ) -> Option<u64> {
+        self.run(state, combine, workspace, true)
+    }
+
+    /// Runs the worklist from `state` in `workspace`; with `stop_at_goal`, only until the last
+    /// goal fact is closed. Returns the combined goal cost.
+    fn run(
+        &self,
+        state: &State,
+        combine: Combine,
+        workspace: &mut Workspace,
+        stop_at_goal: bool,
+    ) -> Option<u64> {
+        workspace.reset(self);
+        let mut run = Run {
+            relaxation: self,
+            combine,
+            ws: workspace,
+        };
+        run.seed(state);
+        run.drain(stop_at_goal);
+
+        run.goal_cost()
     }
 }
 
-/// The working state of one [`Relaxation::explore`] call.
+/// One [`Relaxation::run`] over the buffers of a [`Workspace`].
 struct Run<'a> {
     /// The relaxation being explored.
     relaxation: &'a Relaxation,
     /// How rules combine their condition costs.
     combine: Combine,
-    /// Best cost offered to each fact so far; final once the fact is closed.
-    cost: Vec<Option<u64>>,
-    /// The rule behind each entry of [`Run::cost`].
-    supporter: Vec<Option<usize>>,
-    /// Whether each fact is closed.
-    closed: Vec<bool>,
-    /// Number of conditions of each rule that are not closed yet.
-    unsatisfied: Vec<usize>,
-    /// Combined cost of the closed conditions of each rule.
-    accumulated: Vec<u64>,
-    /// Open facts by `(cost, fact id)`, lowest first. May hold stale entries.
-    heap: BinaryHeap<Reverse<(u64, usize)>>,
-    /// Closed facts in closing order.
-    order: Vec<usize>,
+    /// The working memory, reset for this run.
+    ws: &'a mut Workspace,
 }
 
-impl<'a> Run<'a> {
-    /// A run with every fact unreached and every rule waiting for all its conditions.
-    fn new(relaxation: &'a Relaxation, combine: Combine) -> Self {
-        let n = relaxation.num_facts;
-
-        Self {
-            relaxation,
-            combine,
-            cost: vec![None; n],
-            supporter: vec![None; n],
-            closed: vec![false; n],
-            unsatisfied: relaxation
-                .rules
-                .iter()
-                .map(|r| r.conditions.len())
-                .collect(),
-            accumulated: vec![0; relaxation.rules.len()],
-            heap: BinaryHeap::new(),
-            order: Vec::new(),
-        }
-    }
-
+impl Run<'_> {
     /// Offers cost 0 to the facts of `state` and the free facts, then lets every rule
     /// without conditions offer its head.
     fn seed(&mut self, state: &State) {
@@ -174,18 +160,24 @@ impl<'a> Run<'a> {
         }
     }
 
-    /// Closes facts in cost order until the heap is empty.
-    ///
-    /// shortcut: explores every reachable fact, not only until the goal is closed; stop at
-    /// the last goal fact once callers need speed more than full fact costs.
-    fn drain(&mut self) {
-        while let Some(Reverse((cost, fact))) = self.heap.pop() {
-            if self.closed[fact] {
+    /// Closes facts in cost order until the heap is empty or, with `stop_at_goal`, until
+    /// every goal fact is closed.
+    fn drain(&mut self, stop_at_goal: bool) {
+        let mut open_goals = self.relaxation.goal.len();
+        while !(stop_at_goal && open_goals == 0) {
+            let Some(Reverse((cost, fact))) = self.ws.heap.pop() else {
+                break;
+            };
+            if self.ws.closed[fact] {
                 continue;
             }
 
-            self.closed[fact] = true;
-            self.order.push(fact);
+            self.ws.closed[fact] = true;
+            self.ws.order.push(fact);
+            if self.relaxation.is_goal[fact] {
+                open_goals -= 1;
+            }
+
             self.trigger_watchers(fact, cost);
         }
     }
@@ -194,12 +186,12 @@ impl<'a> Run<'a> {
     /// rules whose last condition this was.
     fn trigger_watchers(&mut self, fact: usize, cost: u64) {
         let relaxation = self.relaxation;
-        for &r in &relaxation.watchers[fact] {
-            self.accumulated[r] = self.combine.apply(self.accumulated[r], cost);
-            self.unsatisfied[r] -= 1;
-            if self.unsatisfied[r] == 0 {
+        for &r in relaxation.watchers(fact) {
+            self.ws.accumulated[r] = self.combine.apply(self.ws.accumulated[r], cost);
+            self.ws.unsatisfied[r] -= 1;
+            if self.ws.unsatisfied[r] == 0 {
                 let rule = &relaxation.rules[r];
-                let total = self.accumulated[r].saturating_add(rule.cost);
+                let total = self.ws.accumulated[r].saturating_add(rule.cost);
                 self.offer(rule.head, total, Some(r));
             }
         }
@@ -207,27 +199,19 @@ impl<'a> Run<'a> {
 
     /// Lowers the cost of `fact` to `cost` via `supporter` if that is strictly cheaper.
     fn offer(&mut self, fact: usize, cost: u64, supporter: Option<usize>) {
-        if self.cost[fact].is_none_or(|old| cost < old) {
-            self.cost[fact] = Some(cost);
-            self.supporter[fact] = supporter;
-            self.heap.push(Reverse((cost, fact)));
+        if self.ws.cost[fact].is_none_or(|old| cost < old) {
+            self.ws.cost[fact] = Some(cost);
+            self.ws.supporter[fact] = supporter;
+            self.ws.heap.push(Reverse((cost, fact)));
         }
     }
 
-    /// Combines the goal fact costs and packs the result.
-    fn finish(self) -> Exploration {
+    /// Combines the goal fact costs; `None` if one is unreachable.
+    fn goal_cost(&self) -> Option<u64> {
         let combine = self.combine;
-        let goal_cost = self
-            .relaxation
+        self.relaxation
             .goal
             .iter()
-            .try_fold(0, |acc, &g| self.cost[g].map(|c| combine.apply(acc, c)));
-
-        Exploration {
-            cost: self.cost,
-            supporter: self.supporter,
-            order: self.order,
-            goal_cost,
-        }
+            .try_fold(0, |acc, &g| self.ws.cost[g].map(|c| combine.apply(acc, c)))
     }
 }

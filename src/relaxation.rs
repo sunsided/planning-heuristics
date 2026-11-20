@@ -12,6 +12,7 @@
 
 mod exploration;
 mod plan;
+mod workspace;
 
 use alloc::vec::Vec;
 use core::ops::Range;
@@ -20,6 +21,7 @@ use sas_plus::{Fact, OpId, Task};
 
 pub use exploration::{Combine, Exploration};
 pub use plan::RelaxedPlan;
+pub(crate) use workspace::Workspace;
 
 /// The delete relaxation of a task, indexed for the worklist in [`Relaxation::explore`].
 ///
@@ -34,8 +36,14 @@ pub struct Relaxation {
     /// All rules: first the operator effects grouped by operator (see
     /// [`Relaxation::op_rules`]), then the axioms from [`Relaxation::first_axiom`] on.
     rules: Vec<Rule>,
-    /// For each fact, the rules that have it as a condition. Ascending rule order.
-    watchers: Vec<Vec<usize>>,
+    /// The rules that have fact `f` as a condition are
+    /// `watcher_rules[watcher_starts[f]..watcher_starts[f + 1]]`, in ascending rule order.
+    /// One flat array instead of a vector per fact keeps the hot loop cache-friendly.
+    watcher_starts: Vec<usize>,
+    /// The concatenated watcher lists of all facts; see [`Relaxation::watcher_starts`].
+    watcher_rules: Vec<usize>,
+    /// Number of conditions of each rule, the initial value of the worklist counters.
+    condition_counts: Vec<usize>,
     /// For each operator, the range of its rules in [`Relaxation::rules`]. Empty for an
     /// operator without effects.
     op_rules: Vec<Range<usize>>,
@@ -45,6 +53,8 @@ pub struct Relaxation {
     free: Vec<usize>,
     /// The goal facts, sorted ascending without duplicates.
     goal: Vec<usize>,
+    /// Whether each fact is a goal fact.
+    is_goal: Vec<bool>,
 }
 
 /// A delete-free rule `conditions → head`: one operator effect or one axiom.
@@ -88,17 +98,26 @@ impl Relaxation {
             .map(|var| offsets[var] + task.initial.0[var] as usize)
             .collect();
         let goal = sorted_ids(task.goal.iter().map(id));
-        let watchers = watchers(&rules, num_facts);
+        let mut is_goal = alloc::vec![false; num_facts];
+        for &g in &goal {
+            is_goal[g] = true;
+        }
+
+        let (watcher_starts, watcher_rules) = watchers(&rules, num_facts);
+        let condition_counts = rules.iter().map(|r| r.conditions.len()).collect();
 
         Self {
             offsets,
             num_facts,
             rules,
-            watchers,
+            watcher_starts,
+            watcher_rules,
+            condition_counts,
             op_rules,
             first_axiom,
             free,
             goal,
+            is_goal,
         }
     }
 
@@ -125,6 +144,11 @@ impl Relaxation {
             .iter()
             .zip(&self.offsets)
             .map(|(&value, &offset)| offset + value as usize)
+    }
+
+    /// The rules that have `fact` as a condition, in ascending rule order.
+    fn watchers(&self, fact: usize) -> &[usize] {
+        &self.watcher_rules[self.watcher_starts[fact]..self.watcher_starts[fact + 1]]
     }
 
     /// The axiom rules, in task order.
@@ -172,14 +196,28 @@ fn sorted_ids(ids: impl Iterator<Item = usize>) -> Vec<usize> {
     ids
 }
 
-/// For each of the `num_facts` facts, the rules that have it as a condition.
-fn watchers(rules: &[Rule], num_facts: usize) -> Vec<Vec<usize>> {
-    let mut watchers = alloc::vec![Vec::new(); num_facts];
-    for (r, rule) in rules.iter().enumerate() {
+/// For each of the `num_facts` facts, the rules that have it as a condition, as offsets
+/// (`num_facts + 1` entries) into one flat array of rule indices.
+fn watchers(rules: &[Rule], num_facts: usize) -> (Vec<usize>, Vec<usize>) {
+    let mut starts = alloc::vec![0; num_facts + 1];
+    for rule in rules {
         for &c in &rule.conditions {
-            watchers[c].push(r);
+            starts[c + 1] += 1;
         }
     }
 
-    watchers
+    for f in 0..num_facts {
+        starts[f + 1] += starts[f];
+    }
+
+    let mut next = starts.clone();
+    let mut flat = alloc::vec![0; starts[num_facts]];
+    for (r, rule) in rules.iter().enumerate() {
+        for &c in &rule.conditions {
+            flat[next[c]] = r;
+            next[c] += 1;
+        }
+    }
+
+    (starts, flat)
 }

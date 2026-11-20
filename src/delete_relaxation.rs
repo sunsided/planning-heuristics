@@ -1,27 +1,59 @@
 //! The delete-relaxation heuristics [`HMax`], [`HAdd`] and [`HFf`] over [`sas_plus::State`].
 //!
-//! Each wraps a [`Relaxation`] built once per task. Evaluation allocates its working memory
-//! per call. Each implements [`Heuristic`] for the default cost `u32`, saturating at
-//! [`u32::MAX`]; the inherent `value` returns the exact `u64` estimate.
+//! Each wraps a [`Relaxation`] built once per task and a workspace that is reused across
+//! evaluations, so evaluating a state allocates nothing once the buffers have grown. The
+//! workspace sits in a [`RefCell`], which makes the heuristics `Send` but not `Sync`: share
+//! one per thread (they are cheap to [`Clone`]).
+//!
+//! Each implements [`Heuristic`] for the default cost `u32`, saturating at [`u32::MAX`]; the
+//! inherent `value` returns the exact `u64` estimate.
+
+use core::cell::RefCell;
 
 use sas_plus::{State, Task};
 
-use crate::{Combine, Heuristic, Relaxation};
+use crate::relaxation::Workspace;
+use crate::{Combine, Heuristic, Relaxation, RelaxedPlan};
+
+/// A relaxation plus reusable working memory, shared by the three heuristics.
+#[derive(Clone, Debug)]
+struct Evaluator {
+    /// The relaxation of the task.
+    relaxation: Relaxation,
+    /// Working memory for one evaluation at a time; never borrowed across calls.
+    workspace: RefCell<Workspace>,
+}
+
+impl Evaluator {
+    /// Builds the relaxation of `task` with an empty workspace.
+    fn new(task: &Task) -> Self {
+        Self {
+            relaxation: Relaxation::new(task),
+            workspace: RefCell::default(),
+        }
+    }
+
+    /// The combined goal cost from `state`, stopping once the goal is settled.
+    fn goal_cost(&self, state: &State, combine: Combine) -> Option<u64> {
+        let mut workspace = self.workspace.borrow_mut();
+        self.relaxation.goal_cost_in(state, combine, &mut workspace)
+    }
+}
 
 /// `h_max` (Bonet & Geffner 2001): the cost of the most expensive goal fact when every rule
 /// costs its operator plus its most expensive condition. Admissible.
 #[derive(Clone, Debug)]
 pub struct HMax {
-    /// The relaxation of the task.
-    relaxation: Relaxation,
+    /// The relaxation and its workspace.
+    inner: Evaluator,
 }
 
 /// `h_add` (Bonet & Geffner 2001): the sum of the goal fact costs when every rule costs its
 /// operator plus the sum of its conditions. Not admissible; counts shared subgoals twice.
 #[derive(Clone, Debug)]
 pub struct HAdd {
-    /// The relaxation of the task.
-    relaxation: Relaxation,
+    /// The relaxation and its workspace.
+    inner: Evaluator,
 }
 
 /// `h_FF` (Hoffmann & Nebel 2001): the cost of a relaxed plan extracted from `h_add` best
@@ -32,8 +64,8 @@ pub struct HAdd {
 /// counts it each time. Fast Downward counts every operator once, which can drop below `h_max`.
 #[derive(Clone, Debug)]
 pub struct HFf {
-    /// The relaxation of the task.
-    relaxation: Relaxation,
+    /// The relaxation and its workspace.
+    inner: Evaluator,
 }
 
 impl HMax {
@@ -41,20 +73,20 @@ impl HMax {
     #[must_use]
     pub fn new(task: &Task) -> Self {
         Self {
-            relaxation: Relaxation::new(task),
+            inner: Evaluator::new(task),
         }
     }
 
     /// The `h_max` value of `state`; `None` if the goal is relaxed-unreachable (a dead end).
     #[must_use]
     pub fn value(&self, state: &State) -> Option<u64> {
-        self.relaxation.explore(state, Combine::Max).goal_cost()
+        self.inner.goal_cost(state, Combine::Max)
     }
 
     /// The underlying relaxation, for per-fact costs.
     #[must_use]
     pub fn relaxation(&self) -> &Relaxation {
-        &self.relaxation
+        &self.inner.relaxation
     }
 }
 
@@ -63,7 +95,7 @@ impl HAdd {
     #[must_use]
     pub fn new(task: &Task) -> Self {
         Self {
-            relaxation: Relaxation::new(task),
+            inner: Evaluator::new(task),
         }
     }
 
@@ -71,13 +103,13 @@ impl HAdd {
     /// Saturates at [`u64::MAX`].
     #[must_use]
     pub fn value(&self, state: &State) -> Option<u64> {
-        self.relaxation.explore(state, Combine::Add).goal_cost()
+        self.inner.goal_cost(state, Combine::Add)
     }
 
     /// The underlying relaxation, for per-fact costs.
     #[must_use]
     pub fn relaxation(&self) -> &Relaxation {
-        &self.relaxation
+        &self.inner.relaxation
     }
 }
 
@@ -86,20 +118,34 @@ impl HFf {
     #[must_use]
     pub fn new(task: &Task) -> Self {
         Self {
-            relaxation: Relaxation::new(task),
+            inner: Evaluator::new(task),
         }
     }
 
     /// The `h_FF` value of `state`; `None` if the goal is relaxed-unreachable (a dead end).
     #[must_use]
     pub fn value(&self, state: &State) -> Option<u64> {
-        self.relaxation.relaxed_plan(state).map(|plan| plan.cost())
+        let mut workspace = self.inner.workspace.borrow_mut();
+        self.inner.relaxation.relaxed_plan_in(state, &mut workspace)
     }
 
-    /// The underlying relaxation, for relaxed plans and per-fact costs.
+    /// The relaxed plan behind [`HFf::value`]; `None` for a dead end. Reuses the working
+    /// memory; only the returned operator list is allocated.
+    #[must_use]
+    pub fn relaxed_plan(&self, state: &State) -> Option<RelaxedPlan> {
+        let mut workspace = self.inner.workspace.borrow_mut();
+        let cost = self
+            .inner
+            .relaxation
+            .relaxed_plan_in(state, &mut workspace)?;
+
+        Some(RelaxedPlan::new(workspace.plan.clone(), cost))
+    }
+
+    /// The underlying relaxation, for per-fact costs.
     #[must_use]
     pub fn relaxation(&self) -> &Relaxation {
-        &self.relaxation
+        &self.inner.relaxation
     }
 }
 

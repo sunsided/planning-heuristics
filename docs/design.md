@@ -79,9 +79,17 @@ Tie-breaking (deterministic): lower cost first, then lower fact id; a fact keeps
 that offered it its final cost. Since rules fire in closing order and watchers are in rule
 order, "first" means the rule whose last condition closed first, then the lower rule index.
 
-The exploration runs until the heap is empty, so every fact gets its exact relaxed cost
-(`Exploration::cost`). Stopping once all goal facts are closed is a known speed-up, left as a
-marked shortcut until a caller needs it.
+`Relaxation::explore` runs until the heap is empty, so every fact gets its exact relaxed cost
+(`Exploration::cost`). The heuristics stop as soon as the last goal fact is closed: goal costs
+are final then, and so are the supporters and closing order of every closed fact, which is all
+relaxed plan extraction needs. Tests check that both give the same goal cost.
+
+Memory: `HMax`, `HAdd` and `HFf` keep a workspace (costs, supporters, counters, heap, closing
+order, plan buffers) in a `RefCell` and refill it in place per evaluation, so a state costs no
+allocation once the buffers have grown (`HFf::relaxed_plan` allocates only the returned
+operator list). The `RefCell` makes them `Send` but not `Sync`; clone one per thread.
+`Relaxation::explore` and `Relaxation::relaxed_plan` allocate a fresh workspace per call.
+The watcher lists are one flat array with per-fact offsets (CSR) instead of a vector per fact.
 
 `h_max` = max of the goal fact costs, `h_add` = sum. `None` if a goal fact is unreachable, which
 proves a dead end (the relaxation over-approximates reachability).
@@ -283,9 +291,10 @@ published manifest stays valid once that version exists on crates.io.
 
 1. **Done**: `Relaxation`, worklist `h_max` / `h_add`, `h_FF` with relaxed plan extraction,
    axioms and conditional effects, `Heuristic` trait, oracle tests.
-2. Reuse and speed: per-call buffer reuse (today each call allocates), early stop at the goal,
-   preferred operators, incremental evaluation hooks; criterion benchmark against width-search's
-   sweep on the fixtures. Then propose the width-search switch.
+2. Speed, in progress: **done**: workspace reuse, early stop at the goal, flat watcher lists,
+   criterion bench (`benches/relaxation.rs`) against width-search's sweep. Open: preferred
+   operators, indexed axiom closure in the plan replay, incremental evaluation hooks. Then
+   propose the width-search switch.
 3. Red-black `h_RB` (painting strategies, plan repair).
 4. LM-cut.
 5. Landmark count (needs the stateful extension).
