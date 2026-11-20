@@ -244,8 +244,7 @@ variable is black and `h_RB > h_FF` on some states.
   `TrackingMode::Count` (LAMA) and `TrackingMode::UniformCost` (admissible; acceptance
   without orderings, required-again only from goals and greedy-necessary orderings, merge by
   intersection). Tests run a reference A* and GBFS.
-- Open: LM-cut with context splitting for conditional effects (it uses `max(sum, h_max)`
-  instead), optimal partitioning over action landmarks (LM-cut's cuts) or the tracked
+- Open: optimal partitioning over action landmarks (LM-cut's cuts) or the tracked
   landmarks, `PathHeuristic` in `search-core`.
 
 ## Adapters (done)
@@ -449,7 +448,9 @@ the scaling of the indexed closure is not measured here.
 3. Red-black `h_RB` (greedy, causal-graph-level and conflict-directed painting, plan repair),
    **done**.
 4. LM-cut, **done** (`src/lm_cut.rs`): `h_max` from scratch per round, operator-level
-   costs over effect rules, `max(sum, h_max)` with conditional effects.
+   costs over effect rules; `LmCut::new` splits conditional operators by context (at most 64
+   copies each, `src/lm_cut/contexts.rs`), so the cut sum dominates `h_max`; the
+   `max(sum, h_max)` fallback remains for larger operators and shared relaxations.
 5. Landmarks: `h^1` and RHW landmarks, disjunctive landmarks, reasonable orderings, landmark
    count, uniform and optimal (LP, feature `lp`) cost partitioning, path-dependent tracking
    (`PathHeuristic`, `LandmarkTracker`), **done**.

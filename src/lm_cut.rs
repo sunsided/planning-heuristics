@@ -2,6 +2,8 @@
 //!
 //! See [`LmCut`].
 
+mod contexts;
+
 use alloc::borrow::Cow;
 use alloc::collections::BinaryHeap;
 use alloc::vec::Vec;
@@ -67,9 +69,14 @@ impl ActionLandmark {
 ///
 /// Without conditional effects the sum is at least `h_max`. With them, charging an operator
 /// lowers all its effects at once, and `h_max` can drop by more than the charge when a cheapest
-/// relaxed path uses two effects of one operator; the estimate is then `max(sum, h_max)`, still
-/// admissible. (Röger, Pommerening & Helmert 2014 avoid the loss by context splitting, which is
-/// not done here.)
+/// relaxed path uses two effects of one operator. [`LmCut::new`] therefore first splits each
+/// conditional operator by *context* (Röger, Pommerening & Helmert 2014): one copy per
+/// assignment of its effect-condition variables to a mentioned value or "any other", with the
+/// matching effects made unconditional. The copies have every plan of the original task, so
+/// the cuts stay landmarks (reported as original operators), and the sum is again at least
+/// `h_max`. An operator with more than 64 contexts stays unsplit; then, and over a shared
+/// relaxation ([`LmCut::with_relaxation`], which never splits), the estimate is
+/// `max(sum, h_max)`, still admissible ([`LmCut::is_exact`] tells which).
 ///
 /// `h_max` is recomputed from scratch each round (a Dijkstra over the rules), so a state
 /// costs `O(rounds × rules × log facts)`.
@@ -116,8 +123,13 @@ impl ActionLandmark {
 pub struct LmCut<'r> {
     /// The relaxation of the task, owned or shared.
     relaxation: Cow<'r, Relaxation>,
-    /// The cost of each operator.
+    /// The cost of each operator of the relaxation.
     costs: Vec<u64>,
+    /// With context splitting, the original operator of each operator of the relaxation.
+    op_of: Option<Vec<OpId>>,
+    /// Whether every operator's effects share one condition set (no conditional effect is
+    /// left), so the cut sum is at least `h_max` and is the estimate.
+    exact: bool,
     /// The rules with head `f` are `by_head[head_starts[f]..head_starts[f + 1]]`.
     head_starts: Vec<usize>,
     /// The concatenated rule lists per head; see [`LmCut::head_starts`].
@@ -154,16 +166,28 @@ struct Work {
     cut: Vec<OpId>,
 }
 
+/// Most context copies per operator for [`LmCut::new`].
+const MAX_CONTEXTS: usize = 64;
+
 impl LmCut<'static> {
-    /// Builds `h_LM-cut` for `task`, owning its relaxation.
+    /// Builds `h_LM-cut` for `task`, owning its relaxation. Operators with conditional
+    /// effects are split by context first (at most 64 copies per operator; see
+    /// [`LmCut::is_exact`]).
     #[must_use]
     pub fn new(task: &Task) -> Self {
-        Self::from_cow(Cow::Owned(Relaxation::new(task)))
+        match contexts::split(task, MAX_CONTEXTS) {
+            Some(split) => {
+                let mut h = Self::from_cow(Cow::Owned(Relaxation::new(&split.task)));
+                h.op_of = Some(split.op_of);
+                h
+            }
+            None => Self::from_cow(Cow::Owned(Relaxation::new(task))),
+        }
     }
 }
 
 impl<'r> LmCut<'r> {
-    /// Builds `h_LM-cut` over a shared `relaxation`.
+    /// Builds `h_LM-cut` over a shared `relaxation`, without context splitting.
     #[must_use]
     pub fn with_relaxation(relaxation: &'r Relaxation) -> Self {
         Self::from_cow(Cow::Borrowed(relaxation))
@@ -175,10 +199,16 @@ impl<'r> LmCut<'r> {
             .map(|op| relaxation.op_rules(op).first().map_or(0, |r| r.cost))
             .collect();
         let (head_starts, by_head) = head_index(&relaxation);
+        let exact = (0..relaxation.num_operators()).all(|op| {
+            let rules = relaxation.op_rules(op);
+            rules.iter().all(|r| r.conditions == rules[0].conditions)
+        });
 
         Self {
             relaxation,
             costs,
+            op_of: None,
+            exact,
             head_starts,
             by_head,
             work: Work::default(),
@@ -194,8 +224,17 @@ impl<'r> LmCut<'r> {
     pub fn value(&mut self, state: &State) -> Option<u64> {
         let mut total = 0_u64;
         let h_max = self.run(state, |_, cost| total = total.saturating_add(cost))?;
+        debug_assert!(!self.exact || total >= h_max, "LM-cut dominates h_max");
 
         Some(total.max(h_max))
+    }
+
+    /// Whether the estimate is the plain cut sum: no conditional effect is left in the
+    /// relaxation, either because the task has none or because context splitting compiled
+    /// them all away. Otherwise the estimate is `max(sum, h_max)`.
+    #[must_use]
+    pub fn is_exact(&self) -> bool {
+        self.exact
     }
 
     /// The action landmarks behind [`LmCut::value`], in the order they were found; their
@@ -208,11 +247,18 @@ impl<'r> LmCut<'r> {
     #[must_use]
     pub fn landmarks(&mut self, state: &State) -> Option<Vec<ActionLandmark>> {
         let mut found = Vec::new();
-        self.run(state, |ops, cost| {
-            let mut ops = ops.to_vec();
+        let op_of = self.op_of.take();
+        let done = self.run(state, |ops, cost| {
+            let mut ops: Vec<OpId> = match &op_of {
+                Some(op_of) => ops.iter().map(|&op| op_of[op]).collect(),
+                None => ops.to_vec(),
+            };
             ops.sort_unstable();
+            ops.dedup();
             found.push(ActionLandmark { ops, cost });
-        })?;
+        });
+        self.op_of = op_of;
+        done?;
 
         Some(found)
     }

@@ -44,20 +44,49 @@ fn goal_reachable_without(task: &Task, start: &State, banned: &[OpId]) -> bool {
 /// partitioning, so callers can check the test is not vacuous.
 fn check_lm_cut(name: &str, task: &Task) -> (usize, usize) {
     let relaxation = Relaxation::new(task);
-    let mut lm_cut = LmCut::with_relaxation(&relaxation);
     let conditional = task
         .operators
         .iter()
         .any(|o| o.eff.iter().any(|e| !e.conditions.is_empty()));
-    let mut h_max = HMax::with_relaxation(&relaxation);
-    let mut uniform = UniformLandmarkCost::with_relaxation(&relaxation);
+    let mut unsplit = LmCut::with_relaxation(&relaxation);
+    assert_eq!(unsplit.is_exact(), !conditional, "{name}");
+    let mut split = LmCut::new(task);
+    assert!(split.is_exact() || conditional, "{name}");
+
+    let a = check_variant(&format!("{name}, unsplit"), task, &relaxation, &mut unsplit);
+    let b = check_variant(&format!("{name}, split"), task, &relaxation, &mut split);
+
+    (a.0 + b.0, a.1 + b.1)
+}
+
+/// [`check_lm_cut`] for one LM-cut variant.
+fn check_variant(
+    name: &str,
+    task: &Task,
+    relaxation: &Relaxation,
+    lm_cut: &mut LmCut<'_>,
+) -> (usize, usize) {
+    let mut h_max = HMax::with_relaxation(relaxation);
+    let mut uniform = UniformLandmarkCost::with_relaxation(relaxation);
     let mut above = (0, 0);
 
     for (state, h_star) in oracle::perfect(task) {
         let ctx = || format!("{name}, state {:?}", state.0);
         let value = lm_cut.value(&state);
         let max = h_max.value(&state);
-        assert_eq!(value.is_none(), max.is_none(), "dead ends, {}", ctx());
+        // Context splitting drops effects that contradict their precondition, so the split
+        // variant can prove more dead ends than `h_max`; each must be real.
+        if max.is_none() || lm_cut.is_exact() && value.is_none() {
+            assert!(max.is_none() <= value.is_none(), "dead ends, {}", ctx());
+            assert!(
+                value.is_some() || h_star.is_none(),
+                "false dead end, {}",
+                ctx()
+            );
+        } else {
+            assert_eq!(value.is_none(), max.is_none(), "dead ends, {}", ctx());
+        }
+
         let (Some(value), Some(max)) = (value, max) else {
             continue;
         };
@@ -70,12 +99,8 @@ fn check_lm_cut(name: &str, task: &Task) -> (usize, usize) {
         let landmarks = lm_cut.landmarks(&state).expect("not a dead end");
         let sum: u64 = landmarks.iter().map(ActionLandmark::cost).sum();
         assert_eq!(value, sum.max(max), "{}", ctx());
-        if !conditional {
-            assert!(
-                sum >= max,
-                "sum {sum} < h_max {max} without conditional effects, {}",
-                ctx()
-            );
+        if lm_cut.is_exact() {
+            assert!(sum >= max, "exact, but sum {sum} < h_max {max}, {}", ctx());
         }
 
         for landmark in &landmarks {
@@ -226,4 +251,48 @@ fn lm_cut_is_zero_at_the_goal() {
         ..task.clone()
     };
     assert_eq!(LmCut::new(&empty).value(&empty.initial_state()), Some(0));
+}
+
+/// Context splitting makes the cut sum dominate `h_max` on conditional tasks, where the
+/// unsplit variant needs the `max(sum, h_max)` fallback on some states.
+#[test]
+fn context_splitting_removes_the_fallback() {
+    let params = RandomTaskParams {
+        max_conditions: 2,
+        ..RandomTaskParams::default()
+    };
+    let (mut fallback, mut exact) = (0, 0);
+    for seed in 0..SEEDS {
+        let task = random_task(seed, params);
+        let relaxation = Relaxation::new(&task);
+        let mut unsplit = LmCut::with_relaxation(&relaxation);
+        let mut split = LmCut::new(&task);
+        exact += usize::from(split.is_exact());
+        let mut h_max = HMax::with_relaxation(&relaxation);
+        for state in oracle::perfect(&task).keys() {
+            let Some(max) = h_max.value(state) else {
+                continue;
+            };
+
+            let sum = |h: &mut LmCut<'_>| {
+                h.landmarks(state)
+                    .map(|l| l.iter().map(ActionLandmark::cost).sum::<u64>())
+            };
+            fallback += usize::from(sum(&mut unsplit).is_some_and(|s| s < max));
+            if split.is_exact() {
+                // `None`: a dead end the split task proves; checked against h* elsewhere.
+                let s = sum(&mut split);
+                assert!(
+                    s.is_none_or(|s| s >= max),
+                    "seed {seed}, state {:?}",
+                    state.0
+                );
+            }
+        }
+    }
+
+    assert!(
+        exact > 0 && fallback > 0,
+        "vacuous: exact {exact}, fallback {fallback}"
+    );
 }
