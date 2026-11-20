@@ -73,33 +73,43 @@ their `impl` path. Not done now to avoid depending on an unpublished draft.
 
 `Relaxation::explore(state, Combine::{Max, Add})`:
 
-1. Offer cost 0 to every fact of `state` and to every free fact (see axioms), and let every rule
-   without conditions offer `rule.cost` to its head. These rules are never triggered otherwise.
-2. Pop the open fact with the lowest `(cost, fact id)` from a binary heap; skip it if it is
-   already closed. Close it and, for each watching rule, combine the cost into the rule's
+1. Close every fact of `state` and every free fact (see axioms) at cost 0 directly, which is
+   what popping them first would do minus the queue traffic, and let them trigger their
+   watchers. Then let every rule without conditions offer `rule.cost` to its head; these
+   rules are never triggered otherwise.
+2. Pop an open fact with the lowest cost from the queue; skip it if it is already closed. Close it and, for each watching rule, combine the cost into the rule's
    accumulator (`max` or saturating `+`) and decrement its counter. A rule whose counter hits 0
    offers `accumulator + rule.cost` to its head.
 3. An offer lowers a fact's cost only if strictly cheaper; the offering rule becomes the fact's
    best supporter.
 
 Both `max` and `+` are monotone and never below their arguments, so a closed fact never
-improves (Knuth 1977). Cost: `O((facts + rule conditions) · log facts)` per state, against the
-`O(facts · rules)` sweeps of width-search's copy.
+improves (Knuth 1977). So pushed costs never drop below the last popped one, and the queue is a
+bucket queue (Dial 1969): one bucket per cost below 1024, scanned forward only, with a binary
+heap for larger costs, so large or sparse costs never scan or allocate a bucket per value.
+Cost: `O(facts + rule conditions)` per state plus `O(log facts)` per fact above cost 1024,
+against the `O(facts · rules)` sweeps of width-search's copy.
 
-Tie-breaking (deterministic): lower cost first, then lower fact id; a fact keeps the first rule
-that offered it its final cost. Since rules fire in closing order and watchers are in rule
-order, "first" means the rule whose last condition closed first, then the lower rule index.
+Tie-breaking (deterministic, but not by fact id): equal costs pop in reverse push order (each
+bucket is a stack; the heap part orders by fact id). A fact keeps the first rule that offered
+it its final cost.
 
-`Relaxation::explore` runs until the heap is empty, so every fact gets its exact relaxed cost
+`Relaxation::explore` runs until the queue is empty, so every fact gets its exact relaxed cost
 (`Exploration::cost`). The heuristics stop as soon as the last goal fact is closed: goal costs
 are final then, and so are the supporters and closing order of every closed fact, which is all
 relaxed plan extraction needs. Tests check that both give the same goal cost.
 
 Memory: read-only tables and per-evaluation state are split. `Relaxation` holds the tables
 and is `Sync`. `HMax<'r>`, `HAdd<'r>` and `HFf<'r>` hold a `Cow<'r, Relaxation>` plus an owned
-workspace (costs, supporters, counters, queue, closing order, plan buffers), refilled in place
-per evaluation, so a state costs no allocation once the buffers have grown
-(`HFf::relaxed_plan` allocates only the returned operator list). Two constructors:
+workspace (costs, supporters, counters, queue, closing order, plan buffers). A state costs no
+allocation once the buffers have grown (`HFf::relaxed_plan` allocates only the returned
+operator list), and starting an evaluation is `O(1)`: fact and rule slots carry the epoch of
+the evaluation that wrote them, a stale fact slot reads as unreached, and a stale rule slot
+restarts its counters on first touch. So an evaluation that stops early at the goal never pays
+for the facts and rules it did not reach. The stamps are wiped once every `2³¹` evaluations
+(unit-tested across the wrap). Hot per-fact data (cost, supporter, stamp) and per-rule data
+(counters, head, cost, stamp) sit in one slot each, ids are `u32`, and the combine operator is
+a const generic so the inner loop has no branch on it. Two constructors:
 
 - `HMax::new(&task) -> HMax<'static>` owns its relaxation: one line for one thread;
 - `HMax::with_relaxation(&relaxation) -> HMax<'r>` borrows a shared one: build the
@@ -313,7 +323,7 @@ published manifest stays valid once that version exists on crates.io.
 states, criterion means, one noisy shared machine: width-search's unchanged code moved by up
 to ±40% between runs, so read only large differences).
 
-Criterion means, before / after this milestone's changes:
+Milestone 2a (workspace reuse, early stop), criterion means, before / after:
 
 | Task | h_max | h_add | h_FF | width-search h_add (unchanged code) |
 |---|---|---|---|---|
@@ -324,20 +334,37 @@ Criterion means, before / after this milestone's changes:
 | logistics-e | 2.22 / 2.08 ms | 1.79 / 2.22 ms | 2.69 / 2.17 ms | 3.16 / 0.89 ms |
 | random 40×400 | 1.66 / 0.35 ms | 1.21 / 0.30 ms | 1.91 / 0.31 ms | 0.73 / 0.52 ms |
 
-Workspace reuse and early stop help most where allocation or the part of the fact space
-behind the goal dominates (small tasks, random). On logistics-e width-search's sweep is
-faster: its rule order converges in few passes, while the worklist pays a heap operation per
-offer. Next candidate: a bucket queue for small integer costs (as Fast Downward's adaptive
-queue), with the heap as fallback.
+Milestone 2b (bucket queue, packed slots, direct start facts, epoch stamps). Profile first
+(callgrind on logistics-e `h_add`; perf is not permitted on this machine): the binary heap was
+about 30% of instructions, the rest bounds-checked indexing and per-fact/per-rule bookkeeping
+plus about 4% clearing buffers, so the heap hypothesis held only in part. Wiring showed the
+fixed per-evaluation cost dominating (resets, start facts through the queue). Two runs each,
+before (`5e2efa5`) and after (`e5714ed`), criterion means:
+
+| Task | h_max | h_add | h_FF | width-search h_add |
+|---|---|---|---|---|
+| courier | 23.8, 18.6 / 11.4, 12.1 µs | 26.9, 16.9 / 11.8, 14.6 µs | 29.8, 24.8 / 17.2, 52.6* µs | 28.9, 20.6 / 20.3, 28.7 µs |
+| wiring | 9.7, 8.3 / 2.5, 2.3 µs | 8.7, 7.4 / 2.7, 2.0 µs | 10.0, 8.0 / 4.0, 4.3 µs | 4.5, 3.0 / 3.0, 2.6 µs |
+| gripper-costs | 10.9, 7.8 / 5.6, 4.9 µs | 11.6, 7.5 / 6.1, 4.3 µs | 9.4, 8.5 / 8.9, 5.9 µs | 23.6, 9.3 / 10.0, 7.9 µs |
+| bw-large-a | 3.55, 1.66 / 1.41, 1.01 ms | 2.54, 1.60 / 1.55, 1.10 ms | 2.29, 1.62 / 1.66, 1.13 ms | 2.27, 1.92 / 2.31, 1.63 ms |
+| logistics-e | 1.32, 1.08 / 0.50, 0.37 ms | 1.49, 1.22 / 0.59, 0.40 ms | 2.70, 1.59 / 0.82, 0.58 ms | 0.95, 0.83 / 0.96, 0.58 ms |
+| random 40×400 | 298, 275 / 100, 77 µs | 474, 258 / 96, 75 µs | 283, 275 / 109, 83 µs | 720, 441 / 547, 367 µs |
+
+(* one outlier run.) `h_max` and `h_add` are now at or below width-search's `h_add` on every
+task in both runs; on logistics-e by about 1.4–1.6×, on bw-large-a about 1.5×, on random about
+5×. Instruction counts (callgrind, per evaluation) agree: logistics-e 92k ours vs 144k theirs.
+`h_FF` does more work (plan marking and replay) and is above width-search's `h_add` on wiring
+(4.0–4.3 vs 2.6–3.0 µs), where the axiom closure in the replay rescans all axioms.
 
 ## Milestones
 
 1. **Done**: `Relaxation`, worklist `h_max` / `h_add`, `h_FF` with relaxed plan extraction,
    axioms and conditional effects, `Heuristic` trait, oracle tests.
-2. Speed, in progress: **done**: workspace reuse, early stop at the goal, flat watcher lists,
-   criterion bench (`benches/relaxation.rs`) against width-search's sweep. Open: preferred
-   operators, indexed axiom closure in the plan replay, incremental evaluation hooks. Then
-   propose the width-search switch.
+2. Speed, **done**: workspace reuse, early stop at the goal, flat watcher lists, bucket
+   queue, packed slots, `O(1)` reset with epoch stamps, criterion bench
+   (`benches/relaxation.rs`) against width-search's sweep. Open: preferred operators,
+   indexed axiom closure in the plan replay, incremental evaluation hooks. Then propose the
+   width-search switch.
 3. Red-black `h_RB` (painting strategies, plan repair).
 4. LM-cut.
 5. Landmark count (needs the stateful extension).
