@@ -287,6 +287,29 @@ run in CI (or in a fresh clone), width-search needs a release with `h_add`; then
 to it. `cargo publish` keeps only the `version` of a dev-dependency and drops the `path`, so the
 published manifest stays valid once that version exists on crates.io.
 
+## Benchmark
+
+`cargo bench --bench relaxation` evaluates 100 reachable states per task (times per 100
+states, criterion means, one noisy shared machine: width-search's unchanged code moved by up
+to ±40% between runs, so read only large differences).
+
+Criterion means, before / after this milestone's changes:
+
+| Task | h_max | h_add | h_FF | width-search h_add (unchanged code) |
+|---|---|---|---|---|
+| courier | 41.1 / 27.8 µs | 38.0 / 25.0 µs | 54.9 / 28.5 µs | 23.4 / 19.5 µs |
+| wiring | 18.1 / 9.6 µs | 16.6 / 8.7 µs | 18.9 / 8.3 µs | 3.6 / 4.0 µs |
+| gripper-costs | 14.1 / 9.1 µs | 16.1 / 8.4 µs | 25.6 / 10.4 µs | 13.1 / 8.2 µs |
+| bw-large-a | 1.99 / 1.75 ms | 2.43 / 1.86 ms | 2.37 / 1.74 ms | 4.37 / 2.65 ms |
+| logistics-e | 2.22 / 2.08 ms | 1.79 / 2.22 ms | 2.69 / 2.17 ms | 3.16 / 0.89 ms |
+| random 40×400 | 1.66 / 0.35 ms | 1.21 / 0.30 ms | 1.91 / 0.31 ms | 0.73 / 0.52 ms |
+
+Workspace reuse and early stop help most where allocation or the part of the fact space
+behind the goal dominates (small tasks, random). On logistics-e width-search's sweep is
+faster: its rule order converges in few passes, while the worklist pays a heap operation per
+offer. Next candidate: a bucket queue for small integer costs (as Fast Downward's adaptive
+queue), with the heap as fallback.
+
 ## Milestones
 
 1. **Done**: `Relaxation`, worklist `h_max` / `h_add`, `h_FF` with relaxed plan extraction,
