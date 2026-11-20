@@ -274,7 +274,7 @@ C). All three were checked against the PDFs.
 | S: stop when the red-black plan is a real plan (AAAI) | `RedBlackPlan::is_plan_for` | matches (the check; the search stops) |
 | Red facts following: `R+ = G[V^R] ∪ ⋃ pre(a)[V^R]`; loop over `A'`; `UPDATE` in topological order; `ACHIEVE` (AIJ Fig. 6) | `repair/follow.rs` | matches; `ACHIEVE` uses the dynamic red facts instead of the explicit inverse-arc set, as Section 5.3.1 does |
 | Choice point (i): fewest estimated steps via all-pairs DTG distances, prefer actions whose black moves delete no achieved `R+` fact (AIJ 5.3.2) | `best_candidate` | matches; distances are operator costs, ties to the lowest id |
-| With axioms a derived `R+` fact may have no achieving action | apply the first achievable unapplied relaxed plan action | our extension (the paper has no axioms); keeps the loop finite |
+| With axioms a derived `R+` fact may have no achieving action | apply the first achievable unapplied relaxed plan action, capped at `|R+| + |relaxed plan|` steps | our extension (the paper has no axioms); bug fixed (8c501c8): a repeated relaxed plan operator was never used up and the loop hung; regression test `following_uses_up_repeated_operators` |
 | Fixed number of black variables, fixed domains: polynomial (ICAPS Thm. 1) | `Painting::bounded`, `product.rs` tree search with merged aggregate values | matches the ICAPS search; node budget and `h_FF` fallback are ours |
 
 Tests (for every strategy in both fragments, each with plain repair, forwarding and red facts
