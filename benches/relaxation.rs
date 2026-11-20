@@ -106,8 +106,7 @@ fn bench_task(criterion: &mut Criterion, name: &str, task: &Task) {
         follow: true,
         ..RedBlackOptions::default()
     };
-    let h_rb_follow =
-        RedBlack::with_painting(task, &Painting::greedy_dag(task)).with_options(follow);
+    let h_rb_follow = RedBlack::with_painting(task, &Painting::greedy(task)).with_options(follow);
     bench_heuristic(&mut group, "h_rb_follow", h_rb_follow, &states);
     bench_heuristic(&mut group, "lm_cut", LmCut::new(task), &states);
     bench_heuristic(&mut group, "lm_count", LandmarkCount::new(task), &states);

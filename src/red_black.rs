@@ -37,7 +37,8 @@ pub struct RedBlackPlan {
 }
 
 /// Options of [`RedBlack`], set with [`RedBlack::with_options`]; the default is plain relaxed
-/// plan repair.
+/// plan repair. Both are ignored with a [`Painting::bounded`] painting, which uses product
+/// search.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
 pub struct RedBlackOptions {
     /// Relaxed plan forwarding (option F of Katz, Hoffmann & Domshlak, AAAI 2013): before the
@@ -101,7 +102,7 @@ impl RedBlackPlan {
     }
 }
 
-/// The red-black heuristic `h_RB` by relaxed plan repair.
+/// The red-black heuristic `h_RB`, by default by relaxed plan repair.
 ///
 /// A red-black state holds a set of red facts, which only grows, and one value per black
 /// variable. The estimate comes from relaxed plan repair: take the `h_FF` relaxed plan, and
@@ -113,10 +114,16 @@ impl RedBlackPlan {
 /// with RSE-invertible black variables a path always exists (Domshlak, Hoffmann & Katz 2015,
 /// Corollary 1 and Theorem 11), so the fallback only happens outside that fragment or at the
 /// operator budget of a DAG painting. The repaired plan contains the relaxed plan, so
-/// `h_RB >= h_FF` always, with equality when every variable is red. With
-/// [`RedBlackOptions::follow`], red facts following replaces the repair (and `h_RB >= h_FF`
-/// no longer holds, only `h_RB >= h+`). Dead ends are exactly those
-/// of `h_FF` (no relaxed plan means no red-black plan). Not admissible.
+/// `h_RB >= h_FF`, with equality when every variable is red, and the dead ends are exactly
+/// those of `h_FF` (no relaxed plan means no red-black plan). Not admissible.
+///
+/// Two other algorithms replace the repair, and for both only `h_RB >= h+` holds (every
+/// red-black plan is a relaxed plan), not `h_RB >= h_FF`:
+///
+/// - with [`RedBlackOptions::follow`], red facts following;
+/// - with a [`Painting::bounded`] painting, product search over the black variables, which
+///   also reports states whose red-black task is unsolvable as dead ends, even when a relaxed
+///   plan exists (all of them real dead ends).
 ///
 /// ```mermaid
 /// graph LR
@@ -279,7 +286,8 @@ impl<'r> RedBlack<'r> {
         &self.black
     }
 
-    /// The `h_RB` value of `state`; `None` if the goal is relaxed-unreachable (a dead end).
+    /// The `h_RB` value of `state`; `None` for a dead end: the goal is relaxed-unreachable,
+    /// or (with a [`Painting::bounded`] painting) red-black-unreachable.
     ///
     /// # Panics
     ///
