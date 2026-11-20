@@ -221,9 +221,9 @@ regression). It can switch only after it grounds to `sas_plus::Task` (roadmap op
 
 ## Cross-crate needs
 
-- **width-search**: expose nothing new; it can switch to this crate once published. To compare
-  its h_add with ours in tests it would need a public `h_add` (today private). Not done; see
-  Testing.
+- **width-search**: release `SasProblem::h_add` (local branch `feature/public-h-add`) so the
+  comparison test can run in CI. Its `h_add` sums duplicated rule conditions twice and lacks
+  free derived defaults (see Testing); both go away when it switches to this crate.
 - **sas-plus**: none required. Nice to have: SCCs on `CausalGraph` and DTGs (red-black),
   indexed axiom evaluation (would replace the `close_axioms` rescans here).
 - **heuristic-search**: publish the `Heuristic<S, C>` trait (or extract `search-core`), then this
@@ -254,20 +254,30 @@ effect, shared subgoal, unreachable goal, free derived default, satisfied goal).
 Seeds are looped directly; no proptest, since the generator is already seeded and the state
 spaces are small. Keep any later proptest at `PROPTEST_CASES=64`.
 
-Comparison with width-search: skipped. Its h_add is private, and its only public relaxed-plan
-output (`relaxed_plan_features`) depends on tie-breaking and on its axiom semantics (no free
-derived defaults), so equality would be flaky or wrong. If it is wanted later, add as a
-dev-dependency:
+Comparison with width-search (`tests/it/width_search.rs`): `h_add` against
+`width_search::sas::SasProblem::h_add` on every reachable state of the fixtures and of random
+tasks (plain, conditional effects, conditional effects plus axioms). The values are equal on
+tasks without axioms and without effect conditions that repeat a precondition fact. Elsewhere
+ours is at most theirs wherever both are finite, for two known reasons:
+
+- with axioms, width-search does not treat derived defaults as free, so it can report a dead
+  end or a higher cost where the default only holds after an operator;
+- width-search does not deduplicate a rule's conditions, so a fact that is both a precondition
+  and an effect condition is summed twice (e.g. random task seed 31 with `max_conditions: 2`:
+  ours 13, theirs 15). Ours counts it once, which is the standard `h_add`.
+
+The dev-dependency is
 
 ```toml
 [dev-dependencies]
 width-search = { path = "../width-search", version = "0.2.0", features = ["sas-plus"] }
 ```
 
-`cargo publish` keeps only the `version` of a dev-dependency and drops the `path`, so the
-published manifest stays valid as long as that version exists on crates.io; a path-only
-dev-dependency is stripped entirely. Compare on tasks without axioms, and compare `h_add`
-values only once width-search exposes them.
+`SasProblem::h_add` exists only on the local, unpushed width-search branch
+`feature/public-h-add`, so the comparison runs only against that local checkout. Before it can
+run in CI (or in a fresh clone), width-search needs a release with `h_add`; then bump `version`
+to it. `cargo publish` keeps only the `version` of a dev-dependency and drops the `path`, so the
+published manifest stays valid once that version exists on crates.io.
 
 ## Milestones
 

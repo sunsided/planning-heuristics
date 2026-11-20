@@ -9,7 +9,7 @@ use crate::check::check_task;
 use crate::oracle;
 
 /// Fixture name and `output.sas` contents.
-const FIXTURES: &[(&str, &str)] = &[
+pub const FIXTURES: &[(&str, &str)] = &[
     (
         "gripper-costs",
         include_str!("../fixtures/gripper-costs/output.sas"),
@@ -41,7 +41,7 @@ const FIXTURES: &[(&str, &str)] = &[
 ];
 
 /// Parses the fixture `name`.
-fn load(name: &str) -> Task {
+pub fn load(name: &str) -> Task {
     let (_, text) = FIXTURES
         .iter()
         .find(|(n, _)| *n == name)

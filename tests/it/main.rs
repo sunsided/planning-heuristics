@@ -6,3 +6,4 @@ mod examples;
 mod fixtures;
 mod oracle;
 mod random;
+mod width_search;
