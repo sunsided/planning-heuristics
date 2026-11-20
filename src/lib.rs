@@ -82,8 +82,10 @@ mod abstraction;
 mod additive_max;
 mod delete_relaxation;
 mod h2;
+mod intention;
 mod landmarks;
 mod lm_cut;
+mod math;
 #[cfg(feature = "lp")]
 mod operator_counting;
 mod path;
@@ -97,6 +99,7 @@ pub use abstraction::{AbstractionHeuristic, Adapter, GoalDistance};
 pub use additive_max::AdditiveHMax;
 pub use delete_relaxation::{HAdd, HFf, HMax};
 pub use h2::{H2, H2Error};
+pub use intention::{GoalIntention, IntentionKind, IntentionParams, IntentionTracker, Observation};
 #[cfg(feature = "lp")]
 pub use landmarks::OptimalLandmarkCost;
 pub use landmarks::{

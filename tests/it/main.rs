@@ -6,6 +6,7 @@ mod check;
 mod examples;
 mod fixtures;
 mod hm;
+mod intention;
 mod landmarks;
 mod lm_cut;
 mod lm_cut_seeded;
