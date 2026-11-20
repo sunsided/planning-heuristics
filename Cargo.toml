@@ -12,6 +12,10 @@ keywords = ["planning", "heuristic", "sas", "red-black", "landmarks"]
 categories = ["algorithms", "science", "no-std"]
 
 [dependencies]
+sas-plus = { version = "0.2.1", default-features = false }
+
+[dev-dependencies]
+sas-plus = { version = "0.2.1", features = ["fdr", "random"] }
 
 [lints.rust]
 missing_docs = "warn"
@@ -20,3 +24,9 @@ unsafe_code = "forbid"
 [lints.clippy]
 pedantic = { level = "warn", priority = -1 }
 missing_docs_in_private_items = "warn"
+mod_module_files = "deny"
+allow_attributes = "warn"
+allow_attributes_without_reason = "warn"
+
+[lints.rustdoc]
+broken_intra_doc_links = "deny"
