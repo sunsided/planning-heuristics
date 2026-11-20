@@ -6,6 +6,8 @@
 
 mod heuristics;
 mod labels;
+#[cfg(feature = "lp")]
+mod optimal;
 
 use alloc::vec::Vec;
 
@@ -15,6 +17,8 @@ use crate::Relaxation;
 
 pub use heuristics::{LandmarkCount, UniformLandmarkCost};
 use labels::Labels;
+#[cfg(feature = "lp")]
+pub use optimal::OptimalLandmarkCost;
 
 /// The fact landmarks of one state and their natural orderings.
 ///

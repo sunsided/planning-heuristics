@@ -133,14 +133,14 @@ impl Heuristic<State> for LandmarkCount<'_> {
 #[derive(Clone, Debug)]
 pub struct UniformLandmarkCost<'r> {
     /// The relaxation of the task, owned or shared.
-    relaxation: Cow<'r, Relaxation>,
+    pub(super) relaxation: Cow<'r, Relaxation>,
     /// For each fact, the operators with an effect that adds it, ascending without
     /// duplicates.
-    achievers: Vec<Vec<OpId>>,
+    pub(super) achievers: Vec<Vec<OpId>>,
     /// The cost of each operator.
-    costs: Vec<u64>,
+    pub(super) costs: Vec<u64>,
     /// Label buffers, refilled by every evaluation.
-    labels: Labels,
+    pub(super) labels: Labels,
     /// Per operator, the number of pending landmarks it achieves; `0` until computed in the
     /// current evaluation.
     shares: Vec<u32>,
@@ -260,7 +260,7 @@ fn pending_heads(relaxation: &Relaxation, labels: &Labels, op: OpId) -> u32 {
     clippy::cast_sign_loss,
     reason = "the value is positive; `as` truncates toward zero and saturates"
 )]
-fn round_up_admissible(sum: f64) -> u64 {
+pub(super) fn round_up_admissible(sum: f64) -> u64 {
     let value = sum - 1e-9 * (1.0 + sum);
     if value <= 0.0 {
         return 0;
@@ -276,11 +276,11 @@ fn round_up_admissible(sum: f64) -> u64 {
     clippy::cast_precision_loss,
     reason = "operator costs are u32 and sums stay below 2^53, exact in f64"
 )]
-fn to_f64(cost: u64) -> f64 {
+pub(super) fn to_f64(cost: u64) -> f64 {
     cost as f64
 }
 
 /// Narrows an estimate to `u32`, saturating at [`u32::MAX`].
-fn saturate(value: u64) -> u32 {
+pub(super) fn saturate(value: u64) -> u32 {
     u32::try_from(value).unwrap_or(u32::MAX)
 }

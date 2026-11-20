@@ -11,7 +11,8 @@
 //!   Katz 2015), with the black variables chosen by a [`Painting`].
 //! - [`Relaxation::landmarks`]: `h^1` fact landmarks with natural orderings
 //!   ([`LandmarkGraph`]), and the heuristics [`LandmarkCount`] (inadmissible) and
-//!   [`UniformLandmarkCost`] (admissible, uniform cost partitioning).
+//!   [`UniformLandmarkCost`] (admissible, uniform cost partitioning); with feature `lp`,
+//!   `OptimalLandmarkCost` (admissible, optimal cost partitioning by linear programming).
 //! - [`LmCut`]: the landmark-cut heuristic `h_LM-cut` (Helmert & Domshlak 2009), admissible,
 //!   with its disjunctive [`ActionLandmark`]s.
 //! - [`AbstractionHeuristic`]: goal distances of any [`sas_plus::Abstraction`], such as a
@@ -21,7 +22,7 @@
 //!
 //! ## Planned
 //!
-//! - Optimal landmark cost partitioning, landmark tracking along the search path
+//! - Landmark tracking along the search path
 //! - Preferred operators
 //!
 //! See `docs/design.md` in the repository for the design and the milestones.
@@ -73,6 +74,8 @@ mod relaxation;
 
 pub use abstraction::{AbstractionHeuristic, Adapter, GoalDistance};
 pub use delete_relaxation::{HAdd, HFf, HMax};
+#[cfg(feature = "lp")]
+pub use landmarks::OptimalLandmarkCost;
 pub use landmarks::{LandmarkCount, LandmarkGraph, UniformLandmarkCost};
 pub use lm_cut::{ActionLandmark, LmCut};
 pub use red_black::{Painting, PaintingError, RedBlack, RedBlackPlan};

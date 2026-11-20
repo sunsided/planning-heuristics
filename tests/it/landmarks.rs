@@ -213,3 +213,73 @@ fn landmarks_are_informative_on_gripper() {
     assert_ne!(graph.orderings(), []);
     assert!(UniformLandmarkCost::new(&task).value(&state).unwrap() > 0);
 }
+
+/// The optimal partitioning on every reachable state of `task`: dead ends as the uniform one,
+/// `uniform <= optimal <= h*`. Returns how many states it beats the uniform partitioning.
+#[cfg(feature = "lp")]
+fn check_optimal(name: &str, task: &Task) -> usize {
+    use planning_heuristics::OptimalLandmarkCost;
+
+    let relaxation = Relaxation::new(task);
+    let mut uniform = UniformLandmarkCost::with_relaxation(&relaxation);
+    let mut optimal = OptimalLandmarkCost::with_relaxation(&relaxation);
+    let mut better = 0;
+    for (state, h_star) in oracle::perfect(task) {
+        let ctx = || format!("{name}, state {:?}", state.0);
+        let (u, o) = (uniform.value(&state), optimal.value(&state));
+        assert_eq!(u.is_none(), o.is_none(), "dead ends, {}", ctx());
+        let (Some(u), Some(o)) = (u, o) else {
+            continue;
+        };
+
+        assert!(u <= o, "uniform {u} > optimal {o}, {}", ctx());
+        if let Some(h_star) = h_star {
+            assert!(o <= h_star, "optimal {o} > h* {h_star}, {}", ctx());
+        }
+
+        better += usize::from(o > u);
+    }
+
+    better
+}
+
+/// Optimal landmark cost partitioning on random tasks of every kind and on the fixtures.
+#[cfg(feature = "lp")]
+#[test]
+fn optimal_landmark_cost_partitioning() {
+    let kinds = [
+        ("plain", RandomTaskParams::default()),
+        (
+            "conditional",
+            RandomTaskParams {
+                max_conditions: 2,
+                ..RandomTaskParams::default()
+            },
+        ),
+        (
+            "mixed",
+            RandomTaskParams {
+                num_vars: 5,
+                num_ops: 14,
+                max_conditions: 2,
+                num_derived: 2,
+                ..RandomTaskParams::default()
+            },
+        ),
+    ];
+    let mut better = 0;
+    for (label, params) in kinds {
+        for seed in 0..SEEDS {
+            better += check_optimal(&format!("{label}, seed {seed}"), &random_task(seed, params));
+        }
+    }
+
+    for (name, _) in fixtures::FIXTURES {
+        better += check_optimal(name, &fixtures::load(name));
+    }
+
+    assert!(
+        better > 0,
+        "the optimal partitioning never beats the uniform one"
+    );
+}
