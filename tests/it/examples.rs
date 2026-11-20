@@ -1,6 +1,6 @@
 //! Hand-made tasks with known values for the corner cases of the relaxation.
 
-use planning_heuristics::{HAdd, HFf, HMax};
+use planning_heuristics::{HAdd, HFf, HMax, Heuristic};
 use sas_plus::{Axiom, Effect, Fact, Operator, State, Task, Variable};
 
 use crate::check::check_task;
@@ -126,4 +126,25 @@ fn goal_state_has_empty_plan() {
     assert_eq!(HAdd::new(&task).value(&state), Some(0));
     let plan = HFf::new(&task).relaxation().relaxed_plan(&state).unwrap();
     assert_eq!(plan.ops(), []);
+}
+
+/// Sums beyond `u32` stay exact in `u64` and saturate, not vanish, in the `u32` estimate.
+#[test]
+fn u32_estimate_saturates() {
+    let task = binary_task(
+        2,
+        vec![
+            op(vec![Effect::new(Fact::new(0, 1))], u32::MAX),
+            op(vec![Effect::new(Fact::new(1, 1))], u32::MAX),
+        ],
+        vec![Fact::new(0, 1), Fact::new(1, 1)],
+    );
+    let state = task.initial_state();
+    let h_add = HAdd::new(&task);
+
+    assert_eq!(h_add.value(&state), Some(2 * u64::from(u32::MAX)));
+    assert_eq!(
+        Heuristic::<_, u32>::estimate(&h_add, &state),
+        Some(u32::MAX)
+    );
 }

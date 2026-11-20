@@ -154,9 +154,10 @@ replay handles repeated operators as above.
 - LM-cut (Helmert & Domshlak 2009): repeated `h_max` with justification graphs. Needs a
   variant of the worklist on unary operator rules with per-rule mutable costs, recomputed
   incrementally after each cut. Reuses `Relaxation` with a cost vector override
-  (`explore_with_costs(state, combine, &[u64])`). Conditional effects: LM-cut is defined for
-  them by treating each effect as a unary operator sharing the operator cost; axioms are rejected
-  at first (FD does not support axioms in LM-cut either).
+  (`explore_with_costs(state, combine, &[u64])`). Conditional effects are open: splitting each
+  effect into a unary operator is not enough (it can undercut `h_max`, as the `o: a; a ⇒ b`
+  example shows); it needs context splitting (Röger, Pommerening & Helmert 2014), so reject
+  conditional effects and axioms at first, as Fast Downward does for axioms.
 - Landmark count (Richter & Westphal 2010, `h_LM`): a landmark graph from RHW or `h^m`
   landmarks, plus per-path accepted/required sets. Needs search-path state (the accepted set
   per node), so it does not fit `Heuristic<S, C>` alone; it will need a stateful extension
@@ -165,11 +166,14 @@ replay handles repeated operators as above.
 
 ## Adapters (optional features)
 
-- `merge-and-shrink`: `impl Heuristic<State, u64> for MergeAndShrinkHeuristic` (allowed: the
-  trait is local), forwarding to `value(&State) -> Option<u64>`, plus the saturating `u32` impl.
-  `None` means dead end or pruned; document that the heuristic must be built with
-  `prune: false` for arbitrary states, since a pruned unreachable state is not a dead end. 
-- `cost-partition`: same pattern over its heuristic type (saturated cost partitioning,
+- Feature `merge-and-shrink`: `impl Heuristic<State, u64> for MergeAndShrinkHeuristic` (legal
+  while the trait is local), forwarding to `value(&State) -> Option<u64>`, plus the saturating
+  `u32` impl. At milestone 7, when the trait comes from heuristic-search, this impl becomes an
+  orphan; switch to a wrapper type then (or rely on the shared trait's blanket impl for
+  `Fn(&S) -> Option<C>`: `|s| mas.value(s)`). `None` means dead end or pruned; the heuristic must
+  be built with `prune: false` for arbitrary states, since a pruned unreachable state is not a
+  dead end. Waits for merge-and-shrink 0.3.0.
+- Feature `cost-partition`: same pattern over its heuristic type (saturated cost partitioning,
   max-over-orders), plus feeding it landmark and relaxation-based components later.
 - A generic adapter over `sas_plus::Abstraction` (abstract goal distances on the LTS) may cover
   both if they keep implementing that trait.
@@ -288,4 +292,6 @@ values only once width-search exposes them.
 - M. Katz, J. Hoffmann, C. Domshlak. Who said we need to relax all variables? ICAPS 2013.
 - C. Domshlak, J. Hoffmann, M. Katz. Red-black planning: a new systematic approach to partial
   delete relaxation. AIJ 221, 2015.
+- G. Röger, F. Pommerening, M. Helmert. Optimal planning in the presence of conditional
+  effects: extending LM-Cut with context splitting. ECAI 2014.
 - M. Helmert. The Fast Downward planning system. JAIR 26, 2006. (axioms, SAS+ format)
