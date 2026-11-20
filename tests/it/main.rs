@@ -1,6 +1,7 @@
 //! Integration tests: the heuristics against independent oracles on fixtures and random
 //! tasks.
 
+mod abstraction;
 mod check;
 mod examples;
 mod fixtures;

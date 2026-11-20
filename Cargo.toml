@@ -11,8 +11,18 @@ readme = "README.md"
 keywords = ["planning", "heuristic", "sas", "red-black", "landmarks"]
 categories = ["algorithms", "science", "no-std"]
 
+[features]
+## Heuristic impl for merge-and-shrink's MergeAndShrinkHeuristic.
+merge-and-shrink = ["dep:merge-and-shrink"]
+## Heuristic impls for cost-partition's saturated cost partitioning.
+cost-partition = ["dep:cost-partition"]
+
 [dependencies]
 sas-plus = { version = "0.2.1", default-features = false }
+# Unreleased: MergeAndShrinkHeuristic::value needs 0.3.0 (see docs/design.md).
+merge-and-shrink = { path = "../merge-and-shrink", version = "0.3.0", default-features = false, optional = true }
+# Unreleased: MaxOverOrders needs 0.2.0 (see docs/design.md).
+cost-partition = { path = "../cost-partition", version = "0.2.0", default-features = false, optional = true }
 
 [dev-dependencies]
 criterion = { version = "0.8.2", default-features = false }

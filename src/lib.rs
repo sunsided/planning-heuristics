@@ -56,11 +56,13 @@ extern crate alloc;
 
 use alloc::boxed::Box;
 
+mod abstraction;
 mod delete_relaxation;
 mod landmarks;
 mod red_black;
 mod relaxation;
 
+pub use abstraction::AbstractionHeuristic;
 pub use delete_relaxation::{HAdd, HFf, HMax};
 pub use landmarks::{LandmarkCount, LandmarkGraph, UniformLandmarkCost};
 pub use red_black::{Painting, PaintingError, RedBlack, RedBlackPlan};
