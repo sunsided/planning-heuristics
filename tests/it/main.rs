@@ -14,6 +14,7 @@ mod operator_counting;
 mod oracle;
 mod random;
 mod red_black;
+mod relevance;
 mod rhw;
 mod tracking;
 mod width_search;

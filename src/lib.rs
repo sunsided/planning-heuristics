@@ -89,6 +89,8 @@ mod operator_counting;
 mod path;
 mod red_black;
 mod relaxation;
+mod relevance;
+mod rng;
 mod set_additive;
 
 pub use abstraction::{AbstractionHeuristic, Adapter, GoalDistance};
@@ -110,6 +112,7 @@ pub use red_black::{
     RedBlackPlan, Strategy,
 };
 pub use relaxation::{Combine, Exploration, Relaxation, RelaxedPlan};
+pub use relevance::{RelevanceParams, RelevanceScore};
 pub use set_additive::HSetAdd;
 // The shared trait of the planning crates: `planning_heuristics::Heuristic` and
 // `search_core::Heuristic` are one trait. A doc comment here would be prepended to all three.

@@ -10,6 +10,7 @@ use sas_plus::{CausalGraph, State, Task, VarId};
 use super::invertible::is_rse_invertible;
 use super::{CausalLevel, Fragment, cycle_arc, ineligible, levels, linked, max_by_key};
 use crate::Relaxation;
+use crate::rng::SplitMix64;
 
 /// The choice point of the painting algorithm of Domshlak, Hoffmann & Katz (2015, Figure 8):
 /// which black variable to paint red next. Every strategy stops at a maximal painting for its
@@ -195,26 +196,6 @@ fn sampled_conflicts(task: &Task, state: &State, samples: usize, seed: u64) -> V
     }
 
     total
-}
-
-/// The `SplitMix64` generator: small, seedable and good enough for sampling.
-struct SplitMix64(u64);
-
-impl SplitMix64 {
-    /// The next 64 random bits.
-    fn next(&mut self) -> u64 {
-        self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
-        let mut z = self.0;
-        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-        z ^ (z >> 31)
-    }
-
-    /// A value in `0..n` (`n > 0`), by multiply-shift (bias below `n / 2^64`).
-    fn below(&mut self, n: usize) -> usize {
-        let wide = u128::from(self.next()) * u128::try_from(n).expect("usize fits u128");
-        usize::try_from(wide >> 64).expect("below n")
-    }
 }
 
 /// The black variables of the Figure 8 painting of `task` for `fragment`, ascending.
