@@ -93,6 +93,14 @@ impl<'r> OptimalLandmarkCost<'r> {
     /// Panics if `state` has fewer values than the task has variables.
     #[must_use]
     pub fn value(&mut self, state: &State) -> Option<u64> {
+        let (uniform, optimum) = self.both(state)?;
+
+        Some(optimum.unwrap_or(0).max(uniform))
+    }
+
+    /// The uniform estimate of `state` and the rounded LP optimum (`None` if the solver
+    /// failed); `None` for a relaxed dead end.
+    fn both(&mut self, state: &State) -> Option<(u64, Option<u64>)> {
         let uniform = self.uniform.value(state)?;
         let landmarks: Vec<usize> = self
             .uniform
@@ -101,9 +109,9 @@ impl<'r> OptimalLandmarkCost<'r> {
             .filter(|&l| !self.uniform.achievers[l].is_empty())
             .collect();
         let rows = operator_rows(&self.uniform, &landmarks);
-        let optimum = solve(&landmarks, &rows, &self.uniform.costs).map_or(0, round_up_admissible);
+        let optimum = solve(&landmarks, &rows, &self.uniform.costs).map(round_up_admissible);
 
-        Some(optimum.max(uniform))
+        Some((uniform, optimum))
     }
 }
 
@@ -175,4 +183,88 @@ fn feasible_sum(values: &[f64], rows: &[(OpId, Vec<usize>)], costs: &[u64]) -> f
     }
 
     values.iter().sum::<f64>() * scale
+}
+
+#[cfg(test)]
+mod tests {
+    //! The raw LP optimum, before it is maxed with the uniform estimate.
+
+    use alloc::collections::{BTreeMap, BinaryHeap};
+    use alloc::format;
+    use alloc::vec::Vec;
+    use core::cmp::Reverse;
+
+    use sas_plus::random::{RandomTaskParams, random_task};
+    use sas_plus::{State, Task};
+
+    use super::OptimalLandmarkCost;
+
+    /// The cost of a cheapest plan from `start`, by Dijkstra; `None` if there is none.
+    fn h_star(task: &Task, start: &State) -> Option<u64> {
+        let mut best: BTreeMap<Vec<u32>, u64> = BTreeMap::from([(start.0.clone(), 0)]);
+        let mut open = BinaryHeap::from([Reverse((0_u64, start.0.clone()))]);
+        while let Some(Reverse((g, values))) = open.pop() {
+            let state = State(values);
+            if best[&state.0] < g {
+                continue;
+            }
+
+            if task.is_goal(&state) {
+                return Some(g);
+            }
+
+            for op in task.applicable_operators(&state) {
+                let next = task.apply(op, &state);
+                let cost = g + u64::from(task.operators[op].cost);
+                if best.get(&next.0).is_none_or(|&old| cost < old) {
+                    best.insert(next.0.clone(), cost);
+                    open.push(Reverse((cost, next.0)));
+                }
+            }
+        }
+
+        None
+    }
+
+    /// On every reachable state of random tasks, the solver succeeds and its rounded optimum
+    /// lies between the uniform estimate and `h*`; somewhere it beats the uniform one.
+    #[test]
+    fn raw_optimum_between_uniform_and_h_star() {
+        let mut better = 0;
+        for seed in 0..32 {
+            let params = RandomTaskParams {
+                max_conditions: 1,
+                ..RandomTaskParams::default()
+            };
+            let task = random_task(seed, params);
+            let mut h = OptimalLandmarkCost::new(&task);
+            let mut stack = alloc::vec![task.initial_state()];
+            let mut seen = alloc::collections::BTreeSet::from([task.initial_state().0]);
+            while let Some(state) = stack.pop() {
+                let ctx = || format!("seed {seed}, state {:?}", state.0);
+                if let Some((uniform, optimum)) = h.both(&state) {
+                    let optimum = optimum.unwrap_or_else(|| panic!("solver failed, {}", ctx()));
+                    assert!(
+                        uniform <= optimum,
+                        "uniform {uniform} > LP {optimum}, {}",
+                        ctx()
+                    );
+                    if let Some(h_star) = h_star(&task, &state) {
+                        assert!(optimum <= h_star, "LP {optimum} > h* {h_star}, {}", ctx());
+                    }
+
+                    better += usize::from(optimum > uniform);
+                }
+
+                for op in task.applicable_operators(&state) {
+                    let next = task.apply(op, &state);
+                    if seen.insert(next.0.clone()) {
+                        stack.push(next);
+                    }
+                }
+            }
+        }
+
+        assert!(better > 0, "the LP never beats the uniform partitioning");
+    }
 }

@@ -88,6 +88,42 @@ impl OrderedLandmarks {
     ///
     /// Not sound as an ordering (a plan may achieve `p` early and again later), so heuristics
     /// that must stay admissible ignore [`OrderingKind::Reasonable`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use planning_heuristics::{OrderingKind, Relaxation};
+    /// use sas_plus::{Effect, Fact, Operator, State, Task, Variable};
+    ///
+    /// // Making `b` resets `a`, and both are goals: achieve `b` first.
+    /// let op = |name: &str, eff: Vec<Fact>| Operator {
+    ///     name: name.into(),
+    ///     pre: vec![],
+    ///     eff: eff.into_iter().map(Effect::new).collect(),
+    ///     cost: 1,
+    /// };
+    /// let task = Task {
+    ///     variables: vec![Variable::new("a", 2), Variable::new("b", 2)],
+    ///     operators: vec![
+    ///         op("make-a", vec![Fact::new(0, 1)]),
+    ///         op("make-b", vec![Fact::new(1, 1), Fact::new(0, 0)]),
+    ///     ],
+    ///     initial: State(vec![0, 0]),
+    ///     goal: vec![Fact::new(0, 1), Fact::new(1, 1)],
+    ///     axioms: vec![],
+    /// };
+    /// let relaxation = Relaxation::new(&task);
+    /// let state = task.initial_state();
+    /// let mut graph = relaxation.rhw_landmarks(&state).unwrap();
+    /// graph.add_reasonable_orderings(&relaxation, &state);
+    ///
+    /// let a = graph.index_of(&[relaxation.fact_id(Fact::new(0, 1))]).unwrap();
+    /// let b = graph.index_of(&[relaxation.fact_id(Fact::new(1, 1))]).unwrap();
+    /// assert!(graph
+    ///     .orderings()
+    ///     .iter()
+    ///     .any(|o| (o.before, o.after, o.kind) == (b, a, OrderingKind::Reasonable)));
+    /// ```
     pub fn add_reasonable_orderings(&mut self, relaxation: &Relaxation, state: &State) {
         let single: BTreeMap<usize, usize> = self
             .landmarks

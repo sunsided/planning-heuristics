@@ -194,9 +194,9 @@ variables keep their deletes, the others are relaxed.
 - More paintings: `Painting::causal_graph_level(task, CausalLevel::{Top, Bottom})` paints by
   longest-path level in the condensed causal graph (sources or sinks first);
   `Painting::conflict_directed(task, state)` replays the relaxed plan of `state` with real
-  values and paints the variables with the most precondition and goal conflicts. Both follow
-  the ideas of the two papers but are not verified against their exact definitions (no access
-  to the papers' code); both keep the repair's restrictions and use the same greedy
+  values and paints the variables with the most precondition and goal conflicts. Both are
+  inspired by the papers but not verified against their exact painting criteria (the AAAI
+  and AIJ texts were not reachable); both keep the repair's restrictions and use the same greedy
   independence pass.
 - Not done: the larger tractable fragments of the papers (black variables linked by a DAG of
   causal-graph arcs with RSE-invertible DTGs), which the repair cannot handle; black variables
@@ -225,8 +225,10 @@ variable is black and `h_RB > h_FF` on some states.
   is checked by brute force over the state space (no goal, resp. no state with the later
   landmark, is reachable while avoiding the landmark); `UniformLandmarkCost <= h*`.
 - Done: `OptimalLandmarkCost` (feature `lp`): the Karpas & Domshlak LP over the pending fact
-  landmarks, solved with `microlp` 0.8 (pure Rust, std only, Rust 1.86; `minilp` is
-  unmaintained, and `good_lp`'s pure-Rust backend is `microlp`). The solution is clamped,
+  landmarks, solved with `microlp` 0.8 (pure Rust, std only, Rust 1.86). Surveyed: `minilp`
+  0.2.2 (std only, last released 2020; `microlp` is its maintained fork) and `good_lp`
+  (a modelling layer whose pure-Rust backends are `microlp` and `clarabel`, default `coin_cbc`
+  is C). None builds `no_std`, hence the feature. The solution is clamped,
   scaled to feasibility and rounded up, then maxed with the uniform estimate, so the value is
   admissible whatever the solver's tolerances. Tests: `uniform <= optimal <= h*`.
 - Done: `Relaxation::rhw_landmarks` (Richter, Helmert & Westphal 2008) into
@@ -464,7 +466,8 @@ the scaling of the indexed closure is not measured here.
 - M. Helmert, C. Domshlak. Landmarks, critical paths and abstractions: what's the difference
   anyway? ICAPS 2009. (LM-cut)
 - S. Richter, M. Westphal. The LAMA planner. JAIR 39, 2010. (landmark count)
-- M. Katz, J. Hoffmann, C. Domshlak. Who said we need to relax all variables? ICAPS 2013.
+- M. Katz, J. Hoffmann. Who said we need to relax all variables? ICAPS 2013.
+- M. Katz, J. Hoffmann, C. Domshlak. Red-black relaxed plan heuristics. AAAI 2013.
 - C. Domshlak, J. Hoffmann, M. Katz. Red-black planning: a new systematic approach to partial
   delete relaxation. AIJ 221, 2015.
 - E. Karpas, C. Domshlak. Cost-optimal planning with landmarks. IJCAI 2009. (uniform and

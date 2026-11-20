@@ -1,4 +1,4 @@
-//! Benchmarks for `h_max`, `h_add`, `h_FF`, `h_RB`, LM-cut and the landmark heuristics, next to width-search's sweep-based `h_add`.
+//! Benchmarks for `h_max`, `h_add`, `h_FF`, `h_RB`, LM-cut, the landmark heuristics and landmark tracking, next to width-search's sweep-based `h_add`.
 //!
 //! Each benchmark evaluates a fixed set of reachable states (breadth-first from the initial
 //! state) of one task. The larger tasks (`bw-large-a`, `logistics-e`, GPL-2.0 / Apache-2.0
@@ -9,7 +9,8 @@ use std::hint::black_box;
 
 use criterion::Criterion;
 use planning_heuristics::{
-    HAdd, HFf, HMax, Heuristic, LandmarkCount, LmCut, RedBlack, UniformLandmarkCost,
+    HAdd, HFf, HMax, Heuristic, LandmarkCount, LandmarkTracker, LmCut, PathHeuristic, RedBlack,
+    TrackingMode, UniformLandmarkCost,
 };
 use sas_plus::fdr::SasFile;
 use sas_plus::random::{RandomTaskParams, random_task};
@@ -109,6 +110,15 @@ fn bench_task(criterion: &mut Criterion, name: &str, task: &Task) {
         &states,
     );
 
+    for (label, mode) in [
+        ("lm_track_count", TrackingMode::Count),
+        ("lm_track_uniform", TrackingMode::UniformCost),
+    ] {
+        if let Some(tracker) = LandmarkTracker::for_task(task, mode) {
+            bench_tracker(&mut group, label, tracker, &states);
+        }
+    }
+
     let width = SasProblem::new(task);
     group.bench_function("width_search_h_add", |b| {
         b.iter(|| {
@@ -133,6 +143,29 @@ fn bench_heuristic(
             states
                 .iter()
                 .map(|s| heuristic.estimate(black_box(s)))
+                .collect::<Vec<_>>()
+        });
+    });
+}
+
+/// Benchmarks a path-dependent heuristic as a search uses it: `on_expand` from the start
+/// state's information to each sampled state, then `estimate`, all states as one iteration.
+fn bench_tracker(
+    group: &mut criterion::BenchmarkGroup<'_, criterion::measurement::WallTime>,
+    label: &str,
+    mut tracker: LandmarkTracker<'_>,
+    states: &[State],
+) {
+    let start = &states[0];
+    let root = tracker.root(start);
+    group.bench_function(label, |b| {
+        b.iter(|| {
+            states
+                .iter()
+                .map(|s| {
+                    let info = tracker.on_expand(start, &root, 0, black_box(s));
+                    tracker.estimate(s, &info)
+                })
                 .collect::<Vec<_>>()
         });
     });

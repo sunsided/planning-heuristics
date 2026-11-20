@@ -4,7 +4,7 @@
 use alloc::borrow::Cow;
 use alloc::vec::Vec;
 
-use sas_plus::{OpId, State, Task};
+use sas_plus::{Fact, OpId, State, Task};
 
 use super::heuristics::{round_up_admissible, to_f64};
 use super::ordered::{OrderedLandmarks, OrderingKind};
@@ -119,6 +119,8 @@ pub struct LandmarkTracker<'r> {
     mode: TrackingMode,
     /// The landmarks, each a set of fact ids.
     landmarks: Vec<Vec<usize>>,
+    /// The landmarks' facts, resolved once for the per-node truth tests.
+    facts: Vec<Vec<Fact>>,
     /// Per landmark, the landmarks ordered before it by any ordering (for
     /// [`TrackingMode::Count`] acceptance).
     parents: Vec<Vec<usize>>,
@@ -190,6 +192,10 @@ impl<'r> LandmarkTracker<'r> {
         }
 
         let landmarks: Vec<Vec<usize>> = graph.landmarks().to_vec();
+        let facts = landmarks
+            .iter()
+            .map(|l| l.iter().map(|&f| relaxation.fact(f)).collect())
+            .collect();
         let achievers = landmarks
             .iter()
             .map(|l| {
@@ -218,6 +224,7 @@ impl<'r> LandmarkTracker<'r> {
             relaxation,
             mode,
             landmarks,
+            facts,
             parents,
             greedy_children,
             goal,
@@ -231,10 +238,7 @@ impl<'r> LandmarkTracker<'r> {
 
     /// Whether landmark `i` holds in `state`.
     fn holds(&self, i: usize, state: &State) -> bool {
-        self.landmarks[i].iter().any(|&f| {
-            let fact = self.relaxation.fact(f);
-            state.0[fact.var] == fact.value
-        })
+        self.facts[i].iter().any(|f| state.0[f.var] == f.value)
     }
 
     /// An empty accepted set sized for the graph.

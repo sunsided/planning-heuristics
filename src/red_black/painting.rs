@@ -121,7 +121,9 @@ impl Painting {
         Self::independent(&CausalGraph::new(task), candidates)
     }
 
-    /// A painting by causal graph level (after Katz, Hoffmann & Domshlak 2013): among the
+    /// A painting by causal graph level, inspired by the red-black papers (Katz, Hoffmann &
+    /// Domshlak 2013; Domshlak, Hoffmann & Katz 2015) but not checked against their exact
+    /// criteria: among the
     /// eligible variables with a strongly connected domain transition graph, paint black from
     /// the `start` end of the causal graph, each one not linked to one painted before.
     ///
@@ -129,6 +131,41 @@ impl Painting {
     /// condensed causal graph (its strongly connected components); ties go to the lower
     /// variable id. Variables high in the graph tend to be the ones whose real semantics the
     /// relaxation loses most (a truck that "is everywhere at once").
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use planning_heuristics::{CausalLevel, Painting};
+    /// use sas_plus::{Effect, Fact, Operator, State, Task, Variable};
+    ///
+    /// // A truck (variable 0) carries a package (variable 1: at a, at b, in the truck) from a
+    /// // to b and must end at a again.
+    /// let op = |name: &str, pre: Vec<Fact>, eff: Fact| Operator {
+    ///     name: name.into(),
+    ///     pre,
+    ///     eff: vec![Effect::new(eff)],
+    ///     cost: 1,
+    /// };
+    /// let (t, p) = (|v| Fact::new(0, v), |v| Fact::new(1, v));
+    /// let task = Task {
+    ///     variables: vec![Variable::new("truck", 2), Variable::new("package", 3)],
+    ///     operators: vec![
+    ///         op("drive-a-b", vec![t(0)], t(1)),
+    ///         op("drive-b-a", vec![t(1)], t(0)),
+    ///         op("load-a", vec![t(0), p(0)], p(2)),
+    ///         op("load-b", vec![t(1), p(1)], p(2)),
+    ///         op("unload-a", vec![t(0), p(2)], p(0)),
+    ///         op("unload-b", vec![t(1), p(2)], p(1)),
+    ///     ],
+    ///     initial: State(vec![0, 0]),
+    ///     goal: vec![p(1), t(0)],
+    ///     axioms: vec![],
+    /// };
+    ///
+    /// // The truck is a precondition of every package move: top of the causal graph.
+    /// assert_eq!(Painting::causal_graph_level(&task, CausalLevel::Top).black(), [0]);
+    /// assert_eq!(Painting::causal_graph_level(&task, CausalLevel::Bottom).black(), [1]);
+    /// ```
     #[must_use]
     pub fn causal_graph_level(task: &Task, start: CausalLevel) -> Self {
         let graph = CausalGraph::new(task);
@@ -142,8 +179,9 @@ impl Painting {
         Self::independent(&graph, candidates)
     }
 
-    /// A conflict-directed painting (after Domshlak, Hoffmann & Katz 2015): paint black the
-    /// variables whose real semantics the relaxed plan of `state` violates most often.
+    /// A conflict-directed painting, inspired by the red-black papers but not checked against
+    /// their exact criteria: paint black the variables whose real semantics the relaxed plan
+    /// of `state` violates most often.
     ///
     /// The `h_FF` relaxed plan of `state` is replayed with each variable's real value; a
     /// *conflict* of a variable is an operator of the plan whose precondition on it differs
@@ -156,6 +194,44 @@ impl Painting {
     /// # Panics
     ///
     /// Panics if `state` has fewer values than the task has variables.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use planning_heuristics::{HFf, Painting, RedBlack};
+    /// use sas_plus::{Effect, Fact, Operator, State, Task, Variable};
+    ///
+    /// // A truck (variable 0) carries a package (variable 1: at a, at b, in the truck) from a
+    /// // to b and must end at a again.
+    /// let op = |name: &str, pre: Vec<Fact>, eff: Fact| Operator {
+    ///     name: name.into(),
+    ///     pre,
+    ///     eff: vec![Effect::new(eff)],
+    ///     cost: 1,
+    /// };
+    /// let (t, p) = (|v| Fact::new(0, v), |v| Fact::new(1, v));
+    /// let task = Task {
+    ///     variables: vec![Variable::new("truck", 2), Variable::new("package", 3)],
+    ///     operators: vec![
+    ///         op("drive-a-b", vec![t(0)], t(1)),
+    ///         op("drive-b-a", vec![t(1)], t(0)),
+    ///         op("load-a", vec![t(0), p(0)], p(2)),
+    ///         op("load-b", vec![t(1), p(1)], p(2)),
+    ///         op("unload-a", vec![t(0), p(2)], p(0)),
+    ///         op("unload-b", vec![t(1), p(2)], p(1)),
+    ///     ],
+    ///     initial: State(vec![0, 0]),
+    ///     goal: vec![p(1), t(0)],
+    ///     axioms: vec![],
+    /// };
+    /// let state = task.initial_state();
+    ///
+    /// // The relaxed plan leaves the truck at b but the goal wants it at a: one conflict.
+    /// let painting = Painting::conflict_directed(&task, &state);
+    /// assert_eq!(painting.black(), [0]);
+    /// assert_eq!(HFf::new(&task).value(&state), Some(3));
+    /// assert_eq!(RedBlack::with_painting(&task, &painting).value(&state), Some(4));
+    /// ```
     #[must_use]
     pub fn conflict_directed(task: &Task, state: &State) -> Self {
         let Some(plan) = Relaxation::new(task).relaxed_plan(state) else {

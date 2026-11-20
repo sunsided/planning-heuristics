@@ -37,9 +37,9 @@ impl Relaxation {
     /// including the free defaults of derived variables, are kept but not back-chained.
     ///
     /// Unlike [`Relaxation::landmarks`] (`h^1`, complete for the causal landmarks of the
-    /// delete relaxation), back-chaining finds disjunctions and landmarks of the domain
-    /// transition graphs, which the relaxation does not see, but can miss fact landmarks that
-    /// only the `h^1` fixpoint proves. Each relaxed reachability check is `O(rules)`, one per
+    /// delete relaxation), back-chaining finds disjunctive landmarks, but can miss fact
+    /// landmarks that only the `h^1` fixpoint proves. The domain transition graph step can in
+    /// principle find fact landmarks beyond `h^1`; on the test tasks it never did. Each relaxed reachability check is `O(rules)`, one per
     /// landmark.
     ///
     /// # Panics
