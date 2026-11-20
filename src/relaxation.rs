@@ -76,15 +76,15 @@ pub struct Relaxation {
 
 /// A delete-free rule `conditions → head`: one operator effect or one axiom.
 #[derive(Clone, Debug)]
-struct Rule {
+pub(crate) struct Rule {
     /// Fact ids that must all hold, sorted ascending without duplicates.
-    conditions: Vec<usize>,
+    pub(crate) conditions: Vec<usize>,
     /// The fact the rule makes true.
-    head: usize,
+    pub(crate) head: usize,
     /// The operator the effect belongs to; `None` for an axiom.
-    op: Option<OpId>,
+    pub(crate) op: Option<OpId>,
     /// Cost of applying the rule: the operator cost, `0` for an axiom.
-    cost: u64,
+    pub(crate) cost: u64,
 }
 
 impl Relaxation {
@@ -163,7 +163,10 @@ impl Relaxation {
     }
 
     /// The fact ids true in `state`, one per variable, in variable order.
-    fn state_facts<'s>(&'s self, state: &'s sas_plus::State) -> impl Iterator<Item = u32> + 's {
+    pub(crate) fn state_facts<'s>(
+        &'s self,
+        state: &'s sas_plus::State,
+    ) -> impl Iterator<Item = u32> + 's {
         state
             .0
             .iter()
@@ -177,8 +180,38 @@ impl Relaxation {
     }
 
     /// The rules that have `fact` as a condition, in ascending rule order.
-    fn watchers(&self, fact: usize) -> &[u32] {
+    pub(crate) fn watchers(&self, fact: usize) -> &[u32] {
         &self.watcher_rules[self.watcher_starts[fact]..self.watcher_starts[fact + 1]]
+    }
+
+    /// All rules: the operator effects grouped by operator, then the axioms.
+    pub(crate) fn rules(&self) -> &[Rule] {
+        &self.rules
+    }
+
+    /// The rules of operator `op`, one per effect.
+    pub(crate) fn op_rules(&self, op: OpId) -> &[Rule] {
+        &self.rules[self.op_rules[op].clone()]
+    }
+
+    /// Number of operators of the task.
+    pub(crate) fn num_operators(&self) -> usize {
+        self.op_rules.len()
+    }
+
+    /// The rules without conditions, ascending.
+    pub(crate) fn unconditioned(&self) -> &[u32] {
+        &self.unconditioned
+    }
+
+    /// The facts true in every relaxed state: the defaults of the derived variables.
+    pub(crate) fn free_facts(&self) -> &[u32] {
+        &self.free
+    }
+
+    /// The goal facts, sorted ascending without duplicates.
+    pub(crate) fn goal_facts(&self) -> &[usize] {
+        &self.goal
     }
 
     /// The axioms that have `fact` as a condition, as indices relative to

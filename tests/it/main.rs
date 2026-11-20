@@ -4,6 +4,7 @@
 mod check;
 mod examples;
 mod fixtures;
+mod landmarks;
 mod oracle;
 mod random;
 mod width_search;
