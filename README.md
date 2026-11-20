@@ -7,7 +7,7 @@ Heuristics for classical planning: red-black, FF, landmark and abstraction heuri
 - `h_max`, `h_add` and `h_FF` with relaxed plan extraction (delete relaxation); the
   set-additive `h_sa`; additive `h_max` over an operator partition; `h²` (no axioms)
 - Red-black heuristic `h_RB` by relaxed plan repair, painted greedily, by causal graph level,
-  conflict-directed or explicitly
+  conflict-directed or explicitly, with independent black variables or a black causal DAG
 - `h^1` fact landmarks with natural orderings, and RHW back-chained landmarks with disjunctive
   and DTG landmarks, greedy-necessary and reasonable orderings; landmark count (inadmissible)
   and uniform landmark cost partitioning (admissible); optimal landmark cost partitioning by
@@ -19,8 +19,7 @@ Heuristics for classical planning: red-black, FF, landmark and abstraction heuri
   `sas_plus::Projection`, and (optional features) merge-and-shrink and saturated cost
   partitioning
 
-Not yet: preferred operators, and the larger
-red-black tractable fragments (black variables linked in the causal graph).
+Not yet: preferred operators; `h²` with axioms.
 
 The `Heuristic` trait, `heuristic_fn` and `HeuristicFn` are
 [search-core](https://github.com/sunsided/search-core)'s, re-exported from the crate root, so

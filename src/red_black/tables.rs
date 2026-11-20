@@ -2,8 +2,9 @@
 
 use alloc::vec::Vec;
 
-use sas_plus::{Fact, OpId, Task, VarId};
+use sas_plus::{CausalGraph, Fact, OpId, Task, VarId};
 
+use super::painting::levels;
 use crate::Relaxation;
 
 /// An operator that changes a black variable: one arc of its domain transition graph.
@@ -25,7 +26,8 @@ pub(super) struct Tables {
     pub is_black_fact: Vec<bool>,
     /// For each black variable, the fact id of its value 0.
     pub black_offsets: Vec<usize>,
-    /// For each operator, its preconditions on black variables as `(black index, value)`.
+    /// For each operator, its preconditions on black variables as `(black index, value)`,
+    /// descendants in the black causal graph first (by descending level, stable).
     pub black_pre: Vec<Vec<(usize, u32)>>,
     /// For each operator, its effects on black variables as `(black index, value)`; all
     /// unconditional, since a painting excludes variables of conditional effects.
@@ -38,8 +40,11 @@ pub(super) struct Tables {
     pub transitions: Vec<Vec<Transition>>,
     /// For each black variable, its domain size.
     pub domain: Vec<u32>,
-    /// The goal on black variables as `(black index, value)`.
+    /// The goal on black variables as `(black index, value)`, descendants first.
     pub black_goal: Vec<(usize, u32)>,
+    /// Whether two black variables are linked in the causal graph (a DAG painting), so that
+    /// moving one may require moving another.
+    pub linked: bool,
     /// The fact ids of the goal facts on red variables.
     pub red_goal: Vec<usize>,
 }
@@ -71,8 +76,13 @@ impl Tables {
                 .collect();
             (black_part, red_part)
         };
-        let (black_pre, red_pre): (Vec<_>, Vec<_>) =
+        let (level, linked) = black_levels(task, black);
+        let by_level = |facts: &mut Vec<(usize, u32)>| {
+            facts.sort_by_key(|&(b, _)| core::cmp::Reverse(level[b]));
+        };
+        let (mut black_pre, red_pre): (Vec<_>, Vec<_>) =
             task.operators.iter().map(|op| split(&op.pre)).unzip();
+        black_pre.iter_mut().for_each(by_level);
         let black_eff = task
             .operators
             .iter()
@@ -83,7 +93,8 @@ impl Tables {
                     .collect()
             })
             .collect();
-        let (black_goal, red_goal) = split(&task.goal);
+        let (mut black_goal, red_goal) = split(&task.goal);
+        by_level(&mut black_goal);
 
         Self {
             is_black_fact,
@@ -102,6 +113,7 @@ impl Tables {
                 .collect(),
             black_goal,
             red_goal,
+            linked,
         }
     }
 }
@@ -128,4 +140,23 @@ fn transitions(task: &Task, black: &[VarId]) -> Vec<Vec<Transition>> {
                 .collect()
         })
         .collect()
+}
+
+/// Per black variable (by position in `black`), its level in the causal graph induced on the
+/// black variables (longest path from a source), and whether that graph has an arc at all.
+fn black_levels(task: &Task, black: &[VarId]) -> (Vec<usize>, bool) {
+    let graph = CausalGraph::new(task);
+    let successors: Vec<Vec<usize>> = black
+        .iter()
+        .map(|&v| {
+            graph
+                .successors(v)
+                .iter()
+                .filter_map(|w| black.binary_search(w).ok())
+                .collect()
+        })
+        .collect();
+    let linked = successors.iter().any(|s| !s.is_empty());
+
+    (levels(black.len(), |b| &successors[b]), linked)
 }

@@ -199,8 +199,13 @@ variables keep their deletes, the others are relaxed.
   inspired by the papers but not verified against their exact painting criteria (the AAAI
   and AIJ texts were not reachable); both keep the repair's restrictions and use the same greedy
   independence pass.
-- Not done: the larger tractable fragments of the papers (black variables linked by a DAG of
-  causal-graph arcs with RSE-invertible DTGs), which the repair cannot handle; black variables
+- DAG fragment (Katz, Hoffmann & Domshlak 2013): `Painting::dag` allows black variables
+  linked in the causal graph if the graph on them is acyclic; `Painting::greedy_dag` paints
+  greedily under that rule. The repair then satisfies each transition's black preconditions
+  on causal-graph ancestors recursively, descendants first (an ancestor's move never changes a
+  descendant), under an operator budget; failure falls back to `h_FF`. Invertibility is not
+  required, so this is a best-effort repair, not the papers' polynomial guarantee.
+- Not done: black variables
   with conditional effects, black derived variables, and semi-relaxed plan repair that
   reorders the relaxed plan.
 

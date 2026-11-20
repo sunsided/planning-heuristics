@@ -115,7 +115,7 @@ fn is_red_black_plan(task: &Task, black: &[usize], state: &State, plan: &[OpId])
 }
 
 /// The painting strategies checked, by label.
-const STRATEGIES: [&str; 4] = ["greedy", "top", "bottom", "conflicts"];
+const STRATEGIES: [&str; 5] = ["greedy", "top", "bottom", "conflicts", "dag"];
 
 /// Checks `h_RB` with every strategy on every reachable state of `task`; returns, per entry of
 /// [`STRATEGIES`], the number of states where the repaired plan costs more than `h_FF`.
@@ -131,10 +131,17 @@ fn check_red_black(name: &str, task: &Task) -> [usize; STRATEGIES.len()] {
             "conflicts",
             Painting::conflict_directed(task, &task.initial_state()),
         ),
+        ("dag", Painting::greedy_dag(task)),
     ];
 
     paintings.map(|(label, painting)| {
-        Painting::new(task, painting.black().to_vec()).expect("strategies paint validly");
+        let black = painting.black().to_vec();
+        if label == "dag" {
+            Painting::dag(task, black).expect("the DAG strategy paints a DAG");
+        } else {
+            Painting::new(task, black).expect("strategies paint independently");
+        }
+
         check_painting(&format!("{name}, {label}"), task, &painting)
     })
 }
@@ -424,4 +431,39 @@ fn painting_strategies_hand_checked() {
     assert_eq!(HFf::new(&task).value(&state), Some(3));
     let mut h_rb = RedBlack::with_painting(&task, &conflicts);
     assert_eq!(h_rb.value(&state), Some(4));
+}
+
+/// A DAG painting: `b` can only move while `a = 1`, both black. The repair moves `a` up for
+/// `b`'s transition and back down for the goal; the plan is valid red-black and costs 3, and a
+/// cycle (two operators linking both ways) is rejected.
+#[test]
+fn dag_painting_moves_ancestors() {
+    let ops = vec![
+        op(vec![Fact::new(0, 0)], vec![Effect::new(Fact::new(0, 1))]),
+        op(vec![Fact::new(0, 1)], vec![Effect::new(Fact::new(0, 0))]),
+        op(
+            vec![Fact::new(0, 1), Fact::new(1, 0)],
+            vec![Effect::new(Fact::new(1, 1))],
+        ),
+    ];
+    let mut task = binary_task(2, ops);
+    task.goal = vec![Fact::new(1, 1), Fact::new(0, 0)];
+    let painting = Painting::dag(&task, vec![0, 1]).unwrap();
+    let state = task.initial_state();
+    let mut h_rb = RedBlack::with_painting(&task, &painting);
+    let plan = h_rb.plan(&state).unwrap();
+
+    assert!(plan.is_repaired());
+    assert!(is_red_black_plan(&task, &[0, 1], &state, plan.ops()));
+    assert_eq!(plan.cost(), 3);
+
+    let mut cyclic = task.clone();
+    cyclic.operators.push(op(
+        vec![Fact::new(1, 1)],
+        vec![Effect::new(Fact::new(0, 0))],
+    ));
+    assert!(matches!(
+        Painting::dag(&cyclic, vec![0, 1]),
+        Err(PaintingError::Cyclic(_, _))
+    ));
 }

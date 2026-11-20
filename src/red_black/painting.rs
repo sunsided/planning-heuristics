@@ -10,7 +10,8 @@ use crate::Relaxation;
 /// A choice of black variables for [`crate::RedBlack`]; every other variable is red.
 ///
 /// Black variables must be state variables that no axiom and no conditional effect mentions
-/// (as condition or as effect), and no two may be linked in the causal graph. So an operator
+/// (as condition or as effect), and, for [`Painting::new`], no two may be linked in the
+/// causal graph ([`Painting::dag`] allows an acyclic causal graph on them). So an operator
 /// changes at most one black variable, and an operator that changes a black variable has no
 /// precondition on another: moving one black variable never disturbs another, which is what
 /// lets the repair insert a path in one variable's domain transition graph at a time. An
@@ -45,6 +46,9 @@ pub enum PaintingError {
     ConditionalEffect(VarId),
     /// The two black variables are linked in the causal graph.
     Dependent(VarId, VarId),
+    /// The causal graph on the black variables has a cycle through these two (one arc of it);
+    /// see [`Painting::dag`].
+    Cyclic(VarId, VarId),
 }
 
 impl fmt::Display for PaintingError {
@@ -58,6 +62,12 @@ impl fmt::Display for PaintingError {
             }
             Self::Dependent(u, v) => {
                 write!(f, "variables {u} and {v} are linked in the causal graph")
+            }
+            Self::Cyclic(u, v) => {
+                write!(
+                    f,
+                    "variables {u} and {v} lie on a cycle of the black causal graph"
+                )
             }
         }
     }
@@ -104,6 +114,92 @@ impl Painting {
         }
 
         Ok(Self { black })
+    }
+
+    /// Paints exactly `black` black, allowing causal-graph arcs between black variables as long
+    /// as the causal graph on them is acyclic (the DAG fragment of Katz, Hoffmann & Domshlak
+    /// 2013). An operator then changes at most one black variable (two would link them both
+    /// ways), and the repair moves a black variable's causal-graph ancestors on demand before
+    /// each transition that needs them, descendants first, so a move never disturbs a value
+    /// already in place below it. Without invertible domain transition graphs that can fail or
+    /// blow up; the repair then falls back to `h_FF` (it has an operator budget).
+    ///
+    /// # Errors
+    ///
+    /// - [`PaintingError::UnknownVariable`], [`PaintingError::Derived`],
+    ///   [`PaintingError::InAxiom`] or [`PaintingError::ConditionalEffect`] as for
+    ///   [`Painting::new`];
+    /// - [`PaintingError::Cyclic`] for an arc on a cycle of the black causal graph.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use planning_heuristics::{Painting, PaintingError};
+    /// use sas_plus::{Effect, Fact, Operator, State, Task, Variable};
+    ///
+    /// // Moving `b` needs `a = 1`: an arc a → b, fine for a DAG painting.
+    /// let task = Task {
+    ///     variables: vec![Variable::new("a", 2), Variable::new("b", 2)],
+    ///     operators: vec![
+    ///         Operator {
+    ///             name: "a".into(),
+    ///             pre: vec![],
+    ///             eff: vec![Effect::new(Fact::new(0, 1))],
+    ///             cost: 1,
+    ///         },
+    ///         Operator {
+    ///             name: "b".into(),
+    ///             pre: vec![Fact::new(0, 1)],
+    ///             eff: vec![Effect::new(Fact::new(1, 1))],
+    ///             cost: 1,
+    ///         },
+    ///     ],
+    ///     initial: State(vec![0, 0]),
+    ///     goal: vec![Fact::new(1, 1)],
+    ///     axioms: vec![],
+    /// };
+    ///
+    /// assert_eq!(Painting::new(&task, vec![0, 1]), Err(PaintingError::Dependent(0, 1)));
+    /// assert_eq!(Painting::dag(&task, vec![0, 1]).unwrap().black(), [0, 1]);
+    /// ```
+    pub fn dag(task: &Task, mut black: Vec<VarId>) -> Result<Self, PaintingError> {
+        black.sort_unstable();
+        black.dedup();
+        let excluded = ineligible(task);
+        for &v in &black {
+            if v >= task.num_variables() {
+                return Err(PaintingError::UnknownVariable(v));
+            }
+
+            if let Some(reason) = excluded[v] {
+                return Err(reason);
+            }
+        }
+
+        match cycle_arc(&CausalGraph::new(task), &black) {
+            Some((u, v)) => Err(PaintingError::Cyclic(u, v)),
+            None => Ok(Self { black }),
+        }
+    }
+
+    /// A greedy DAG painting: the candidates and order of [`Painting::greedy`], each painted
+    /// black unless it closes a cycle in the causal graph on the variables painted before.
+    /// Valid for [`Painting::dag`].
+    #[must_use]
+    pub fn greedy_dag(task: &Task) -> Self {
+        let mut candidates = repairable(task);
+        candidates.sort_by_key(|&v| (task.variables[v].domain_size, v));
+        let graph = CausalGraph::new(task);
+        let mut black: Vec<VarId> = Vec::new();
+        for v in candidates {
+            let pos = black.binary_search(&v).unwrap_err();
+            black.insert(pos, v);
+            if cycle_arc(&graph, &black).is_some() {
+                black.remove(pos);
+            }
+        }
+
+        Self { black }
     }
 
     /// A greedy painting: among the eligible variables whose domain transition graph is
@@ -311,7 +407,7 @@ fn repairable(task: &Task) -> Vec<VarId> {
 /// For each of the `n` nodes of a graph with `successors`, the length of the longest path to
 /// it from a source of the graph's condensation (each strongly connected component counts as
 /// one node).
-fn levels<'g>(n: usize, successors: impl Fn(usize) -> &'g [usize]) -> Vec<usize> {
+pub(super) fn levels<'g>(n: usize, successors: impl Fn(usize) -> &'g [usize]) -> Vec<usize> {
     let component = components(n, &successors);
     let count = component.iter().max().map_or(0, |&c| c + 1);
     let mut arcs: Vec<(usize, usize)> = (0..n)
@@ -440,6 +536,27 @@ fn conflicts(task: &Task, state: &State, plan: &[sas_plus::OpId]) -> Vec<usize> 
     }
 
     conflicts
+}
+
+/// An arc `(u, v)` of the causal graph between variables of `black` (ascending) that lies on
+/// a cycle of the graph induced on them; `None` if that graph is acyclic.
+fn cycle_arc(graph: &CausalGraph, black: &[VarId]) -> Option<(VarId, VarId)> {
+    let successors: Vec<Vec<usize>> = black
+        .iter()
+        .map(|&v| {
+            graph
+                .successors(v)
+                .iter()
+                .filter_map(|w| black.binary_search(w).ok())
+                .collect()
+        })
+        .collect();
+    let component = components(black.len(), &|b| successors[b].as_slice());
+
+    (0..black.len())
+        .flat_map(|u| successors[u].iter().map(move |&v| (u, v)))
+        .find(|&(u, v)| component[u] == component[v])
+        .map(|(u, v)| (black[u], black[v]))
 }
 
 /// Whether `u` and `v` are linked by an arc of the causal graph in either direction.

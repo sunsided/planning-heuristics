@@ -30,6 +30,11 @@ pub(super) struct Repair {
     done: Vec<bool>,
     /// The operators of the path being inserted, goal end first.
     path: Vec<OpId>,
+    /// Operators applied in this repair while black variables are linked.
+    steps: usize,
+    /// Most operators one repair may apply while black variables are linked; moving one may
+    /// recursively move its causal-graph ancestors, which can blow up.
+    budget: usize,
 }
 
 impl Repair {
@@ -43,11 +48,9 @@ impl Repair {
         relaxed_plan: &[OpId],
     ) -> Option<u64> {
         self.start(relaxation, tables, state);
+        self.budget = 1024 + 64 * relaxed_plan.len();
         for &op in relaxed_plan {
-            for &(b, value) in &tables.black_pre[op] {
-                self.move_black(relaxation, tables, b, value)?;
-            }
-
+            self.satisfy_black_pre(relaxation, tables, op, None)?;
             if !tables.red_pre[op].iter().all(|&f| self.holds[f]) {
                 return None;
             }
@@ -57,6 +60,14 @@ impl Repair {
 
         for &(b, value) in &tables.black_goal {
             self.move_black(relaxation, tables, b, value)?;
+        }
+
+        if !tables
+            .black_goal
+            .iter()
+            .all(|&(b, value)| self.black[b] == value)
+        {
+            return None;
         }
 
         tables
@@ -88,7 +99,32 @@ impl Repair {
         );
         self.plan.clear();
         self.cost = 0;
+        self.steps = 0;
         close_axioms(relaxation, &mut self.holds);
+    }
+
+    /// Moves every black variable `op` requires (except `skip`) to the required value,
+    /// descendants in the black causal graph first: moving a variable may move its ancestors,
+    /// never its descendants. `None` if one cannot be moved, or if a requirement no longer
+    /// holds afterwards.
+    fn satisfy_black_pre(
+        &mut self,
+        relaxation: &Relaxation,
+        tables: &Tables,
+        op: OpId,
+        skip: Option<usize>,
+    ) -> Option<()> {
+        let required = tables.black_pre[op]
+            .iter()
+            .filter(|&&(b, _)| Some(b) != skip);
+        for &(b, value) in required.clone() {
+            self.move_black(relaxation, tables, b, value)?;
+        }
+
+        required
+            .into_iter()
+            .all(|&(b, value)| self.black[b] == value)
+            .then_some(())
     }
 
     /// Applies `op`, whose preconditions hold: its red effects whose conditions hold are added,
@@ -121,7 +157,9 @@ impl Repair {
 
     /// Moves black variable `b` to `target` along a cheapest path of its domain transition
     /// graph whose operators' red preconditions all hold now, applying the path; `None` if
-    /// there is no such path.
+    /// there is no such path. With linked black variables, the black preconditions of each
+    /// transition on `b`'s causal-graph ancestors are first satisfied recursively (the path's
+    /// cost ignores them), within [`Repair::budget`].
     fn move_black(
         &mut self,
         relaxation: &Relaxation,
@@ -134,18 +172,32 @@ impl Repair {
         }
 
         self.cheapest_paths(tables, b);
-        self.path.clear();
+        // Taken out: moving ancestors below reuses the buffer.
+        let mut path = core::mem::take(&mut self.path);
+        path.clear();
         let mut value = target;
         while value != self.black[b] {
             let (from, op) = self.via[value as usize]?;
-            self.path.push(op);
+            path.push(op);
             value = from;
         }
 
-        for i in (0..self.path.len()).rev() {
-            let op = self.path[i];
+        for i in (0..path.len()).rev() {
+            let op = path[i];
+            if tables.linked {
+                self.steps += 1;
+                if self.steps > self.budget {
+                    return None;
+                }
+
+                self.satisfy_black_pre(relaxation, tables, op, Some(b))?;
+            }
+
             self.apply(relaxation, tables, op);
         }
+
+        path.clear();
+        self.path = path;
 
         Some(())
     }
