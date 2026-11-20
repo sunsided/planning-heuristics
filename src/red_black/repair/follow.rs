@@ -51,7 +51,10 @@ impl Repair {
         self.budget = budget(relaxed_plan);
         self.collect_targets(relaxation, tables, relaxed_plan);
         self.update(tables);
+        // Each step adds an R+ fact or uses up a relaxed plan position; more means a bug.
+        let mut steps = self.following.target.len() + relaxed_plan.len();
         while self.following.target.iter().any(|&f| !self.holds[f]) {
+            steps = steps.checked_sub(1)?;
             let op = self
                 .best_candidate(relaxation, tables)
                 .or_else(|| self.next_relaxed(tables, relaxed_plan))?;
@@ -61,7 +64,12 @@ impl Repair {
             }
 
             self.apply(relaxation, tables, op);
-            if let Some(i) = relaxed_plan.iter().position(|&o| o == op) {
+            // The first unused occurrence: a relaxed plan may repeat an operator.
+            let unused = relaxed_plan
+                .iter()
+                .zip(&self.following.used)
+                .position(|(&o, &used)| o == op && !used);
+            if let Some(i) = unused {
                 self.following.used[i] = true;
             }
 

@@ -863,3 +863,41 @@ fn bounded_painting_searches_products() {
         Err(PaintingError::TooLarge)
     );
 }
+
+/// Regression: red facts following with a relaxed plan that repeats an operator. `a` sets `p`
+/// and, if `p` already held, `q`, so the relaxed plan is `a, a, c`; `c` (needing `q`) sets
+/// `r`, from which an axiom derives the goal `d`. No operator achieves `d`, so following falls
+/// back to the relaxed plan; it must use up both occurrences of `a` and then apply `c`.
+#[test]
+fn following_uses_up_repeated_operators() {
+    let a = op(
+        vec![],
+        vec![
+            Effect::new(Fact::new(0, 1)),
+            Effect {
+                conditions: vec![Fact::new(0, 1)],
+                fact: Fact::new(1, 1),
+            },
+        ],
+    );
+    let c = op(vec![Fact::new(1, 1)], vec![Effect::new(Fact::new(2, 1))]);
+    let mut task = binary_task(4, vec![a, c]);
+    task.variables[3].axiom_layer = Some(0);
+    task.axioms.push(Axiom {
+        conditions: vec![Fact::new(2, 1)],
+        head: Fact::new(3, 1),
+    });
+    task.goal = vec![Fact::new(3, 1)];
+    let state = task.initial_state();
+    let follow = RedBlackOptions {
+        follow: true,
+        ..RedBlackOptions::default()
+    };
+    let plan = RedBlack::with_painting(&task, &Painting::all_red())
+        .with_options(follow)
+        .plan(&state)
+        .unwrap();
+
+    assert!(plan.is_repaired());
+    assert_eq!(plan.ops(), [0, 0, 1]);
+}
