@@ -10,6 +10,7 @@ mod labels;
 mod optimal;
 mod ordered;
 mod rhw;
+mod tracking;
 
 use alloc::vec::Vec;
 
@@ -22,6 +23,7 @@ use labels::Labels;
 #[cfg(feature = "lp")]
 pub use optimal::OptimalLandmarkCost;
 pub use ordered::{LandmarkOrdering, OrderedLandmarks, OrderingKind};
+pub use tracking::{AcceptedLandmarks, LandmarkTracker, TrackingMode};
 
 /// The fact landmarks of one state and their natural orderings.
 ///

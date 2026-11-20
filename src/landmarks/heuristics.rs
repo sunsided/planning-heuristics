@@ -2,8 +2,8 @@
 //!
 //! Both recompute the landmarks from every state they evaluate, so they need no search-path
 //! bookkeeping and fit [`Heuristic`] as it is. LAMA-style landmark counting instead computes
-//! the landmarks once and tracks which ones each path accepted; that needs a stateful
-//! extension of the trait and is not done here.
+//! the landmarks once and tracks which ones each path accepted: see
+//! [`crate::LandmarkTracker`].
 
 use alloc::borrow::Cow;
 use alloc::vec::Vec;
@@ -17,8 +17,8 @@ use crate::{Heuristic, Relaxation};
 /// it yet. Not admissible (one operator can achieve several landmarks) and blind to costs.
 ///
 /// The landmarks are recomputed from every evaluated state, so no search-path bookkeeping is
-/// needed. LAMA instead computes them once and tracks the landmarks each path has accepted,
-/// which needs a stateful extension of [`Heuristic`]; that is not done here.
+/// needed. LAMA instead computes them once and tracks the landmarks each path has accepted;
+/// [`crate::LandmarkTracker`] does that.
 ///
 /// # Examples
 ///

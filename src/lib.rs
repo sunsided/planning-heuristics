@@ -13,6 +13,12 @@
 //!   ([`LandmarkGraph`]), and the heuristics [`LandmarkCount`] (inadmissible) and
 //!   [`UniformLandmarkCost`] (admissible, uniform cost partitioning); with feature `lp`,
 //!   `OptimalLandmarkCost` (admissible, optimal cost partitioning by linear programming).
+//! - [`Relaxation::rhw_landmarks`]: back-chained landmarks (Richter, Helmert & Westphal 2008)
+//!   with disjunctive and domain-transition-graph landmarks, as [`OrderedLandmarks`] with
+//!   natural, greedy-necessary and reasonable orderings ([`OrderingKind`]).
+//! - [`PathHeuristic`]: path-dependent heuristics; [`LandmarkTracker`] tracks the accepted
+//!   landmarks along the search path, as LAMA's landmark count or admissibly with uniform cost
+//!   partitioning.
 //! - [`LmCut`]: the landmark-cut heuristic `h_LM-cut` (Helmert & Domshlak 2009), admissible,
 //!   with its disjunctive [`ActionLandmark`]s.
 //! - [`AbstractionHeuristic`]: goal distances of any [`sas_plus::Abstraction`], such as a
@@ -22,7 +28,6 @@
 //!
 //! ## Planned
 //!
-//! - Landmark tracking along the search path
 //! - Preferred operators
 //!
 //! See `docs/design.md` in the repository for the design and the milestones.
@@ -69,6 +74,7 @@ mod abstraction;
 mod delete_relaxation;
 mod landmarks;
 mod lm_cut;
+mod path;
 mod red_black;
 mod relaxation;
 
@@ -77,10 +83,11 @@ pub use delete_relaxation::{HAdd, HFf, HMax};
 #[cfg(feature = "lp")]
 pub use landmarks::OptimalLandmarkCost;
 pub use landmarks::{
-    LandmarkCount, LandmarkGraph, LandmarkOrdering, OrderedLandmarks, OrderingKind,
-    UniformLandmarkCost,
+    AcceptedLandmarks, LandmarkCount, LandmarkGraph, LandmarkOrdering, LandmarkTracker,
+    OrderedLandmarks, OrderingKind, TrackingMode, UniformLandmarkCost,
 };
 pub use lm_cut::{ActionLandmark, LmCut};
+pub use path::{PathHeuristic, Stateless};
 pub use red_black::{Painting, PaintingError, RedBlack, RedBlackPlan};
 pub use relaxation::{Combine, Exploration, Relaxation, RelaxedPlan};
 // The shared trait of the planning crates: `planning_heuristics::Heuristic` and
@@ -101,5 +108,6 @@ const _: () = {
     send::<UniformLandmarkCost<'static>>();
     send::<RedBlack<'static>>();
     send::<LmCut<'static>>();
+    send::<LandmarkTracker<'static>>();
     send::<AbstractionHeuristic<sas_plus::Projection>>();
 };
