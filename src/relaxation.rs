@@ -249,11 +249,9 @@ fn watchers(rules: &[Rule], num_facts: usize) -> (Vec<usize>, Vec<u32>) {
 fn worklist_tables(rules: &[Rule]) -> (Vec<RuleSlot>, Vec<u32>) {
     let rule_init = rules
         .iter()
-        .map(|r| RuleSlot {
-            unsatisfied: to_u32(r.conditions.len()),
-            head: to_u32(r.head),
-            cost: u32::try_from(r.cost).expect("rule costs come from u32 operator costs"),
-            accumulated: 0,
+        .map(|r| {
+            let cost = u32::try_from(r.cost).expect("rule costs come from u32 operator costs");
+            RuleSlot::new(to_u32(r.conditions.len()), to_u32(r.head), cost)
         })
         .collect();
     let unconditioned = (0..rules.len())

@@ -93,7 +93,11 @@ impl Relaxation {
         let goal_cost = self.run(state, combine, &mut workspace, false);
 
         Exploration {
-            cost: workspace.facts.iter().map(|slot| slot.cost()).collect(),
+            cost: workspace
+                .facts
+                .iter()
+                .map(|slot| slot.cost(workspace.epoch))
+                .collect(),
             goal_cost,
         }
     }
@@ -173,11 +177,11 @@ impl<'a, const ADD: bool> Run<'a, ADD> {
             self.close_at_zero(fact);
         }
 
-        let facts = &self.ws.facts;
+        let (facts, epoch) = (&self.ws.facts, self.ws.epoch);
         self.open_goals = relaxation
             .goal
             .iter()
-            .filter(|&&g| !facts[g].closed)
+            .filter(|&&g| !facts[g].is_closed(epoch))
             .count();
 
         // All start facts are closed before any rule fires, so none gets a supporter.
@@ -195,17 +199,14 @@ impl<'a, const ADD: bool> Run<'a, ADD> {
     /// Closes the start fact `fact` with cost 0 and no supporter, unless it already is.
     #[inline]
     fn close_at_zero(&mut self, fact: u32) {
+        let epoch = self.ws.epoch;
         let slot = &mut self.ws.facts[fact as usize];
-        if slot.closed {
+        if slot.is_closed(epoch) {
             return;
         }
 
-        *slot = FactSlot {
-            cost: 0,
-            supporter: NO_RULE,
-            reached: true,
-            closed: true,
-        };
+        *slot = FactSlot::open(0, NO_RULE, epoch);
+        slot.close(epoch);
         self.ws.order.push(fact);
     }
 
@@ -216,12 +217,13 @@ impl<'a, const ADD: bool> Run<'a, ADD> {
             let Some((cost, fact)) = self.ws.queue.pop() else {
                 break;
             };
+            let epoch = self.ws.epoch;
             let slot = &mut self.ws.facts[fact as usize];
-            if slot.closed {
+            if slot.is_closed(epoch) {
                 continue;
             }
 
-            slot.closed = true;
+            slot.close(epoch);
             self.ws.order.push(fact);
             if self.relaxation.is_goal[fact as usize] {
                 self.open_goals -= 1;
@@ -236,6 +238,7 @@ impl<'a, const ADD: bool> Run<'a, ADD> {
     #[inline]
     fn trigger_watchers(&mut self, fact: usize, cost: u64) {
         let Workspace {
+            epoch,
             facts,
             rules,
             queue,
@@ -243,11 +246,12 @@ impl<'a, const ADD: bool> Run<'a, ADD> {
         } = &mut *self.ws;
         for &r in self.relaxation.watchers(fact) {
             let slot = &mut rules[r as usize];
+            slot.touch(*epoch);
             slot.accumulated = Self::COMBINE.apply(slot.accumulated, cost);
             slot.unsatisfied -= 1;
             if slot.unsatisfied == 0 {
                 let total = slot.accumulated.saturating_add(u64::from(slot.cost));
-                offer(facts, queue, slot.head, total, r);
+                offer(facts, queue, *epoch, slot.head, total, r);
             }
         }
     }
@@ -258,6 +262,7 @@ impl<'a, const ADD: bool> Run<'a, ADD> {
         offer(
             &mut self.ws.facts,
             &mut self.ws.queue,
+            self.ws.epoch,
             fact,
             cost,
             supporter,
@@ -268,7 +273,9 @@ impl<'a, const ADD: bool> Run<'a, ADD> {
     fn goal_cost(&self) -> Option<u64> {
         let combine = Self::COMBINE;
         self.relaxation.goal.iter().try_fold(0, |acc, &g| {
-            self.ws.facts[g].cost().map(|c| combine.apply(acc, c))
+            self.ws.facts[g]
+                .cost(self.ws.epoch)
+                .map(|c| combine.apply(acc, c))
         })
     }
 }
@@ -277,15 +284,17 @@ impl<'a, const ADD: bool> Run<'a, ADD> {
 /// if that is strictly cheaper, and queues it. A free function so the caller can keep other
 /// workspace fields borrowed.
 #[inline]
-fn offer(facts: &mut [FactSlot], queue: &mut Queue, fact: u32, cost: u64, supporter: u32) {
+fn offer(
+    facts: &mut [FactSlot],
+    queue: &mut Queue,
+    epoch: u32,
+    fact: u32,
+    cost: u64,
+    supporter: u32,
+) {
     let slot = &mut facts[fact as usize];
-    if !slot.reached || cost < slot.cost {
-        *slot = FactSlot {
-            cost,
-            supporter,
-            reached: true,
-            closed: false,
-        };
+    if !slot.is_reached(epoch) || cost < slot.cost {
+        *slot = FactSlot::open(cost, supporter, epoch);
         queue.push(cost, fact);
     }
 }

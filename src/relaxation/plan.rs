@@ -13,11 +13,10 @@
 //! `b`; goal `b`. The plan is `[o, o]` with `h_FF = 2 = h_max`; Fast Downward gives `1`.
 
 use alloc::vec::Vec;
-use core::mem;
 
 use sas_plus::{OpId, State};
 
-use super::workspace::refill;
+use super::workspace::Marks;
 use super::{Combine, Relaxation, Workspace};
 
 /// A relaxed plan: operators that reach the goal when deletes are ignored.
@@ -84,17 +83,17 @@ impl Relaxation {
 
     /// Marks the best-supporter rules the goal depends on in `workspace.marked`.
     fn mark_supporters(&self, ws: &mut Workspace) {
-        refill(&mut ws.marked, self.rules.len(), false);
-        refill(&mut ws.seen, self.num_facts, false);
+        ws.marked.reset(self.rules.len(), ws.epoch);
+        ws.seen.reset(self.num_facts, ws.epoch);
         ws.stack.clear();
         ws.stack.extend_from_slice(&self.goal);
         while let Some(fact) = ws.stack.pop() {
-            if mem::replace(&mut ws.seen[fact], true) {
+            if !ws.seen.insert(fact) {
                 continue;
             }
 
-            if let Some(r) = ws.facts[fact].supporter() {
-                ws.marked[r] = true;
+            if let Some(r) = ws.facts[fact].supporter(ws.epoch) {
+                ws.marked.insert(r);
                 ws.stack.extend_from_slice(&self.rules[r].conditions);
             }
         }
@@ -109,20 +108,23 @@ impl Relaxation {
         let mut cost = 0_u64;
         for i in 0..ws.order.len() {
             let fact = ws.order[i] as usize;
-            let Some(r) = ws.facts[fact].supporter().filter(|&r| ws.marked[r]) else {
+            let Some(r) = ws.facts[fact]
+                .supporter(ws.epoch)
+                .filter(|&r| ws.marked.contains(r))
+            else {
                 continue;
             };
             let rule = &self.rules[r];
             let Some(op) = rule.op else {
                 continue;
             };
-            if ws.reached[rule.head] {
+            if ws.reached.contains(rule.head) {
                 continue;
             }
 
             self.apply_relaxed(op, ws);
             debug_assert!(
-                ws.reached[rule.head],
+                ws.reached.contains(rule.head),
                 "a marked rule fires once its conditions hold"
             );
             ws.plan.push(op);
@@ -135,9 +137,9 @@ impl Relaxation {
     /// Sets `workspace.reached` to the facts of `state` plus the free facts, closed under the
     /// axioms.
     fn relaxed_state(&self, state: &State, ws: &mut Workspace) {
-        refill(&mut ws.reached, self.num_facts, false);
+        ws.reached.reset(self.num_facts, ws.epoch);
         for fact in self.start_facts(state) {
-            ws.reached[fact as usize] = true;
+            ws.reached.insert(fact as usize);
         }
 
         self.close_axioms(&mut ws.reached);
@@ -150,11 +152,11 @@ impl Relaxation {
         ws.fired.extend(
             self.rules[self.op_rules[op].clone()]
                 .iter()
-                .filter(|rule| rule.conditions.iter().all(|&c| ws.reached[c]))
+                .filter(|rule| rule.conditions.iter().all(|&c| ws.reached.contains(c)))
                 .map(|rule| rule.head),
         );
         for &head in &ws.fired {
-            ws.reached[head] = true;
+            ws.reached.insert(head);
         }
 
         self.close_axioms(&mut ws.reached);
@@ -164,13 +166,15 @@ impl Relaxation {
     ///
     /// shortcut: rescans all axioms per pass, `O(axioms²)` worst case per call; switch to
     /// condition counters once axiom-heavy tasks matter.
-    fn close_axioms(&self, reached: &mut [bool]) {
+    fn close_axioms(&self, reached: &mut Marks) {
         let mut changed = true;
         while changed {
             changed = false;
             for rule in self.axiom_rules() {
-                if !reached[rule.head] && rule.conditions.iter().all(|&c| reached[c]) {
-                    reached[rule.head] = true;
+                if !reached.contains(rule.head)
+                    && rule.conditions.iter().all(|&c| reached.contains(c))
+                {
+                    reached.insert(rule.head);
                     changed = true;
                 }
             }
