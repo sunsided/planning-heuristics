@@ -354,7 +354,36 @@ before (`5e2efa5`) and after (`e5714ed`), criterion means:
 task in both runs; on logistics-e by about 1.4–1.6×, on bw-large-a about 1.5×, on random about
 5×. Instruction counts (callgrind, per evaluation) agree: logistics-e 92k ours vs 144k theirs.
 `h_FF` does more work (plan marking and replay) and is above width-search's `h_add` on wiring
-(4.0–4.3 vs 2.6–3.0 µs), where the axiom closure in the replay rescans all axioms.
+(4.0–4.3 vs 2.6–3.0 µs). The guess at the time, that the axiom closure in the replay rescanning
+all axioms was the cause, turned out wrong; see milestone 2c.
+
+Milestone 2c (indexed axiom closure, start facts skipped in the replay). Callgrind first, h_FF on
+wiring: of about 2,440 instructions per evaluation, the exploration takes about 1,570 (as much as
+`h_add`) and the axiom closure only about 190. Wiring has 6 axioms, 32 reachable states, and on
+average 0.34 replayed operators per evaluation, so the "rescan per step" cost barely occurs.
+Condition counters per axiom lost to the old short-circuiting scan (their per-evaluation setup
+cost more than it saved). What stayed: one pass over the axioms for the start state, then only
+the axioms watching a newly reached fact are re-evaluated, so a replay step no longer costs a
+pass over all axioms. That alone is neutral on wiring (`d5983ec`); the gain comes from starting
+the replay after the start facts, which the exploration closes first (count recorded in its
+seed). Instructions per evaluation (callgrind, setup subtracted), before (`528665e`) / after
+(`e4e7c09`):
+
+| Task | h_max | h_add | h_FF | width-search h_add |
+|---|---|---|---|---|
+| courier | 4,800 / 4,801 | 4,822 / 4,822 | 6,613 / 6,477 | 6,698 |
+| wiring | 1,563 / 1,564 | 1,565 / 1,565 | 2,444 / 2,244 | 1,400 |
+| gripper-costs | 3,900 / 3,901 | 3,798 / 3,798 | 4,986 / 4,914 | 5,617 |
+| bw-large-a | 182.5k / 182.5k | 174.0k / 174.0k | 179.1k / 178.8k | |
+| logistics-e | 91.7k / 91.7k | 91.4k / 91.4k | 112.4k / 112.1k | |
+| random 40×400 | 18.6k / 18.6k | 18.6k / 18.6k | 20.3k / 19.5k | |
+
+Wall-clock runs on the shared machine were too noisy to separate these (width-search's unchanged
+`h_add` moved by up to ±47% between interleaved runs). `h_FF` on wiring stays above width-search's
+`h_add`: the gap is the exploration itself (`h_add` alone is about 1,565 instructions against
+width-search's 1,400 on this task) plus about 680 for marking supporters, scanning the closing
+order and building the relaxed state, not the axioms. No bench task has more than 6 axioms, so
+the scaling of the indexed closure is not measured here.
 
 ## Milestones
 
@@ -362,8 +391,8 @@ task in both runs; on logistics-e by about 1.4–1.6×, on bw-large-a about 1.5�
    axioms and conditional effects, `Heuristic` trait, oracle tests.
 2. Speed, **done**: workspace reuse, early stop at the goal, flat watcher lists, bucket
    queue, packed slots, `O(1)` reset with epoch stamps, criterion bench
-   (`benches/relaxation.rs`) against width-search's sweep. Open: preferred operators,
-   indexed axiom closure in the plan replay, incremental evaluation hooks. Then propose the
+   (`benches/relaxation.rs`) against width-search's sweep. Indexed axiom closure in
+   the plan replay done. Open: preferred operators, incremental evaluation hooks. Then propose the
    width-search switch.
 3. Red-black `h_RB` (painting strategies, plan repair).
 4. LM-cut.
