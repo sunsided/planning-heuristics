@@ -37,10 +37,7 @@ pub fn check_task(name: &str, task: &Task) -> usize {
         );
         assert_eq!(max.is_none(), add.is_none(), "dead ends, {}", ctx());
         assert_eq!(max.is_none(), ff.is_none(), "dead ends, {}", ctx());
-        assert_eq!(
-            Heuristic::<_, u32>::estimate(&h_ff, state),
-            ff.map(|v| u32::try_from(v).unwrap())
-        );
+        assert_eq!(h_ff.estimate(state), ff.map(|v| u32::try_from(v).unwrap()));
 
         let (Some(max), Some(add), Some(ff)) = (max, add, ff) else {
             assert_eq!(

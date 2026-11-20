@@ -7,6 +7,10 @@
 //! hold, so without conditional effects every operator appears at most once. With them an
 //! operator can appear twice when one of its effects needs another of its effects first;
 //! counting it once would undercut `h_max`.
+//!
+//! So with conditional effects `h_FF` here can be higher than Fast Downward's, which counts
+//! every operator of the relaxed plan once. Example: `o` (cost 1) adds `a` and, if `a` holds,
+//! `b`; goal `b`. The plan is `[o, o]` with `h_FF = 2 = h_max`; Fast Downward gives `1`.
 
 use alloc::vec;
 use alloc::vec::Vec;
@@ -23,7 +27,8 @@ use super::{Combine, Exploration, Relaxation};
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct RelaxedPlan {
     /// The operators in application order. Without conditional effects no operator repeats,
-    /// so this is also the set of operators of the plan.
+    /// so this is also the set of operators of the plan. With conditional effects an operator
+    /// may repeat (see the module docs), and each occurrence counts towards the cost.
     ops: Vec<OpId>,
     /// Sum of the operator costs, saturating at [`u64::MAX`]; this is `h_FF`.
     cost: u64,

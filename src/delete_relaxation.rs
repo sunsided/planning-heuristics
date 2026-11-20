@@ -1,8 +1,8 @@
 //! The delete-relaxation heuristics [`HMax`], [`HAdd`] and [`HFf`] over [`sas_plus::State`].
 //!
 //! Each wraps a [`Relaxation`] built once per task. Evaluation allocates its working memory
-//! per call. Each implements [`Heuristic`] for `u64` (exact) and `u32` (saturating at
-//! [`u32::MAX`]); call `value` for the `u64` estimate without naming the cost type.
+//! per call. Each implements [`Heuristic`] for the default cost `u32`, saturating at
+//! [`u32::MAX`]; the inherent `value` returns the exact `u64` estimate.
 
 use sas_plus::{State, Task};
 
@@ -26,6 +26,10 @@ pub struct HAdd {
 
 /// `h_FF` (Hoffmann & Nebel 2001): the cost of a relaxed plan extracted from `h_add` best
 /// supporters (see [`Relaxation::relaxed_plan`]). Not admissible; `h_max <= h_FF <= h_add`.
+///
+/// With conditional effects this `h_FF` can be higher than Fast Downward's: the relaxed plan
+/// repeats an operator when one of its effects needs another of its own effects first, and
+/// counts it each time. Fast Downward counts every operator once, which can drop below `h_max`.
 #[derive(Clone, Debug)]
 pub struct HFf {
     /// The relaxation of the task.
@@ -99,16 +103,10 @@ impl HFf {
     }
 }
 
-/// Implements [`Heuristic`] over [`State`] for `u64` and `u32` from the type's `value`.
+/// Implements [`Heuristic`] over [`State`] for `u32` from the type's `value`, saturating.
 macro_rules! impl_heuristic {
     ($($ty:ty),*) => {
         $(
-            impl Heuristic<State, u64> for $ty {
-                fn estimate(&self, state: &State) -> Option<u64> {
-                    self.value(state)
-                }
-            }
-
             impl Heuristic<State, u32> for $ty {
                 fn estimate(&self, state: &State) -> Option<u32> {
                     self.value(state).map(|v| u32::try_from(v).unwrap_or(u32::MAX))

@@ -37,9 +37,9 @@
 //! };
 //! let state = task.initial_state();
 //!
-//! assert_eq!(HMax::new(&task).estimate(&state), Some(3_u32));
-//! assert_eq!(HAdd::new(&task).estimate(&state), Some(3_u32));
-//! assert_eq!(HFf::new(&task).estimate(&state), Some(3_u32));
+//! assert_eq!(HMax::new(&task).estimate(&state), Some(3));
+//! assert_eq!(HAdd::new(&task).estimate(&state), Some(3));
+//! assert_eq!(HFf::new(&task).estimate(&state), Some(3));
 //! ```
 //!
 //! Repository: <https://github.com/sunsided/planning-heuristics>

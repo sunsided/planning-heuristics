@@ -32,10 +32,10 @@ Same shape and semantics as `heuristic_search::Heuristic<S, C>` (draft branch): 
 - Every heuristic here computes in `u64` internally (operator costs are `u32` in sas-plus,
   sums can exceed `u32`). Sums saturate at `u64::MAX`; reachability is tracked separately, so a
   saturated value is never mistaken for a dead end.
-- Each heuristic implements `Heuristic<State, u64>` (exact) and `Heuristic<State, u32>`
-  (saturates at `u32::MAX`, which keeps an admissible heuristic admissible). Because both exist,
-  `h.estimate(&s)` needs the cost type from context; each type also has an inherent
-  `value(&State) -> Option<u64>` that needs none.
+- Each heuristic implements only `Heuristic<State, u32>` (the default cost), saturating at
+  `u32::MAX`, which keeps an admissible heuristic admissible. One impl means `h.estimate(&s)`
+  needs no cost-type annotation. Callers that need the wider type use the inherent
+  `value(&State) -> Option<u64>`.
 - A future float estimate over integer costs rounds up (`ceil`), as agreed with heuristic-search.
 
 Plan: define the trait locally for now. Once `heuristic-search` is published (or a `search-core`
@@ -103,7 +103,10 @@ The result is a `RelaxedPlan { ops: Vec<OpId>, cost }` in application order. Wit
 conditional effects no operator repeats, so `ops` is the set of operators of the plan. With
 conditional effects an operator repeats when one of its effects needs another of its own
 effects first (`o: a; a ⇒ b`, goal `b`, cost 1: plan `[o, o]`, `h_FF = 2`). Counting it once,
-as Fast Downward's FF does, gives `h_FF = 1 < h_max = 2`. The replay keeps:
+as Fast Downward's FF does, gives `h_FF = 1 < h_max = 2`. Accepted consequence: with
+conditional effects our `h_FF` can be higher than Fast Downward's on the same state, because a
+repeated operator is counted each time. Without conditional effects both agree up to
+tie-breaking. The replay keeps:
 
 - the plan valid as a relaxed *sequence* (checked in tests), hence `h_max <= h+ <= h_FF`;
 - every appended operator tied to a distinct marked rule, hence `h_FF <= h_add`.
@@ -166,9 +169,9 @@ replay handles repeated operators as above.
 
 ## Adapters (optional features)
 
-- Feature `merge-and-shrink`: `impl Heuristic<State, u64> for MergeAndShrinkHeuristic` (legal
-  while the trait is local), forwarding to `value(&State) -> Option<u64>`, plus the saturating
-  `u32` impl. At milestone 7, when the trait comes from heuristic-search, this impl becomes an
+- Feature `merge-and-shrink`: `impl Heuristic<State> for MergeAndShrinkHeuristic` (legal while
+  the trait is local), saturating its `value(&State) -> Option<u64>` to `u32`.
+  At milestone 7, when the trait comes from heuristic-search, this impl becomes an
   orphan; switch to a wrapper type then (or rely on the shared trait's blanket impl for
   `Fn(&S) -> Option<C>`: `|s| mas.value(s)`). `None` means dead end or pruned; the heuristic must
   be built with `prune: false` for arbitrary states, since a pruned unreachable state is not a
@@ -241,7 +244,7 @@ Integration tests in `tests/it/` (one binary). For every reachable state of ever
   space;
 - `h_max <= h_FF <= h_add`;
 - the relaxed plan is valid under an independent relaxed validator and its cost is `h_FF`;
-- the `u32` trait impl matches the `u64` value.
+- the `u32` trait impl matches the `u64` value (and saturates beyond `u32::MAX`).
 
 Tasks: the MIT/Apache fixtures copied from sas-plus (`tests/fixtures/`, including conditional
 effects and axioms), seeded random tasks from `sas_plus::random` (64 seeds each for plain,

@@ -143,8 +143,5 @@ fn u32_estimate_saturates() {
     let h_add = HAdd::new(&task);
 
     assert_eq!(h_add.value(&state), Some(2 * u64::from(u32::MAX)));
-    assert_eq!(
-        Heuristic::<_, u32>::estimate(&h_add, &state),
-        Some(u32::MAX)
-    );
+    assert_eq!(h_add.estimate(&state), Some(u32::MAX));
 }
