@@ -179,8 +179,8 @@ variables keep their deletes, the others are relaxed.
 
 - Painting: black variables must be state variables outside axioms and conditional effects
   (as condition or effect), pairwise unlinked in `sas_plus::CausalGraph`. Then an operator
-  changes at most one black variable and has no precondition on another, so paths for
-  different black variables never interfere. `Painting::greedy` paints the eligible variables
+  changes at most one black variable, and one that does has no precondition on another, so
+  paths for different black variables never interfere. `Painting::greedy` paints the eligible variables
   with strongly connected DTGs, smallest domain first; `Painting::new` validates a given set
   and reports `PaintingError`; `Painting::all_red` gives `h_FF`.
 - Plan repair: execute the `h_FF` relaxed plan under red-black semantics (red facts

@@ -9,9 +9,11 @@ use sas_plus::{CausalGraph, Task, VarId};
 ///
 /// Black variables must be state variables that no axiom and no conditional effect mentions
 /// (as condition or as effect), and no two may be linked in the causal graph. So an operator
-/// changes at most one black variable, and only its own black variable appears in its
-/// preconditions: moving one black variable never disturbs another, which is what lets the
-/// repair insert a path in one variable's domain transition graph at a time.
+/// changes at most one black variable, and an operator that changes a black variable has no
+/// precondition on another: moving one black variable never disturbs another, which is what
+/// lets the repair insert a path in one variable's domain transition graph at a time. An
+/// operator that changes only red variables may still require several black values; the
+/// repair moves each in turn.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Default)]
 pub struct Painting {
     /// The black variables, ascending.

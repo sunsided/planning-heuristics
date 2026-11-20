@@ -285,3 +285,32 @@ fn failed_repair_falls_back_to_h_ff() {
     assert_eq!(plan.cost(), 7);
     assert_eq!(HFf::new(&task).value(&state), Some(7));
 }
+
+/// Two black switches: a red operator needs both on, the goal needs the first off again.
+/// The relaxed plan (`on0, on1, finish`, cost 3) is repaired by appending `off0`.
+#[test]
+fn two_black_variables_are_repaired_independently() {
+    let set = |var: usize, from: u32, to: u32| {
+        op(
+            vec![Fact::new(var, from)],
+            vec![Effect::new(Fact::new(var, to))],
+        )
+    };
+    let finish = op(
+        vec![Fact::new(0, 1), Fact::new(1, 1)],
+        vec![Effect::new(Fact::new(2, 1))],
+    );
+    let mut task = binary_task(3, vec![set(0, 0, 1), set(1, 0, 1), set(0, 1, 0), finish]);
+    task.goal = vec![Fact::new(2, 1), Fact::new(0, 0)];
+    let state = task.initial_state();
+
+    let painting = Painting::new(&task, vec![0, 1]).unwrap();
+    let plan = RedBlack::with_painting(&task, &painting)
+        .plan(&state)
+        .unwrap();
+
+    assert_eq!(HFf::new(&task).value(&state), Some(3));
+    assert!(plan.is_repaired());
+    assert_eq!(plan.cost(), 4);
+    assert!(is_red_black_plan(&task, &[0, 1], &state, plan.ops()));
+}
