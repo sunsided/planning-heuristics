@@ -8,6 +8,8 @@ mod fixtures;
 mod hm;
 mod landmarks;
 mod lm_cut;
+#[cfg(feature = "lp")]
+mod operator_counting;
 mod oracle;
 mod random;
 mod red_black;

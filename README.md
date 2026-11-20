@@ -32,7 +32,8 @@ these heuristics plug into every search crate built on it.
   in `Adapter` to get a `Heuristic`.
 - `cost-partition`: the same for `cost_partition::CostPartitionedHeuristic` and
   `MaxOverOrders`.
-- `lp`: `OptimalLandmarkCost`, the optimal landmark cost partitioning, solved with the
+- `lp`: `OptimalLandmarkCost`, the optimal landmark cost partitioning, and
+  `OperatorCounting`, the state equation with LM-cut constraints, solved with the
   pure-Rust `microlp`. It needs `std` and Rust 1.86 (the rest of the crate: 1.85).
 
 The first two depend on unreleased versions of those crates (path dependencies for now), as does

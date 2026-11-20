@@ -17,6 +17,8 @@
 //!   ([`LandmarkGraph`]), and the heuristics [`LandmarkCount`] (inadmissible) and
 //!   [`UniformLandmarkCost`] (admissible, uniform cost partitioning); with feature `lp`,
 //!   `OptimalLandmarkCost` (admissible, optimal cost partitioning by linear programming).
+//! - With feature `lp`, `OperatorCounting`: the state equation (Bonet 2013) and LM-cut
+//!   landmarks as an operator-counting LP (Pommerening, Röger, Helmert & Bonet 2014).
 //! - [`Relaxation::rhw_landmarks`]: back-chained landmarks (Richter, Helmert & Westphal 2008)
 //!   with disjunctive and domain-transition-graph landmarks, as [`OrderedLandmarks`] with
 //!   natural, greedy-necessary and reasonable orderings ([`OrderingKind`]).
@@ -80,6 +82,8 @@ mod delete_relaxation;
 mod h2;
 mod landmarks;
 mod lm_cut;
+#[cfg(feature = "lp")]
+mod operator_counting;
 mod path;
 mod red_black;
 mod relaxation;
@@ -96,6 +100,8 @@ pub use landmarks::{
     OrderedLandmarks, OrderingKind, TrackingMode, UniformLandmarkCost,
 };
 pub use lm_cut::{ActionLandmark, LmCut};
+#[cfg(feature = "lp")]
+pub use operator_counting::{CountingConstraints, OperatorCounting};
 pub use path::{PathHeuristic, Stateless};
 pub use red_black::{CausalLevel, Painting, PaintingError, RedBlack, RedBlackPlan};
 pub use relaxation::{Combine, Exploration, Relaxation, RelaxedPlan};

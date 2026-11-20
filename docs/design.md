@@ -6,7 +6,8 @@ Status: draft, milestones 1 to 7 implemented (branch `draft/initial`). Version s
 
 Goal-distance heuristics for classical planning over `sas_plus::Task` (0.2.1):
 
-- delete relaxation: `h_max`, `h_add`, `h_FF` with relaxed plan extraction (milestone 1);
+- delete relaxation: `h_max`, `h_add`, `h_FF` with relaxed plan extraction (milestone 1),
+  set-additive `h_sa`, additive `h_max`; `h²`; operator counting (state equation, LP);
 - red-black partial delete relaxation (`h_RB`);
 - landmarks: LM-cut, `h^1` and RHW landmarks with disjunctions and reasonable orderings,
   landmark count, uniform and optimal (LP) cost partitioning, path-dependent tracking;
@@ -244,6 +245,11 @@ variable is black and `h_RB > h_FF` on some states.
   `TrackingMode::Count` (LAMA) and `TrackingMode::UniformCost` (admissible; acceptance
   without orderings, required-again only from goals and greedy-necessary orderings, merge by
   intersection). Tests run a reference A* and GBFS.
+- Done: `OperatorCounting` (feature `lp`): operator-counting LP with the state equation
+  (Bonet 2013; may-produce minus always-consume per state-variable fact) and LM-cut landmarks
+  as constraints (Pommerening, Röger, Helmert & Bonet 2014); infeasible means dead end, the
+  optimum is rounded up after a `1e-6` tolerance and floored at LM-cut. Tests: `<= h*`, only
+  real dead ends, at least LM-cut, the combination at least each part.
 - Open: optimal partitioning over action landmarks (LM-cut's cuts) or the tracked
   landmarks, `PathHeuristic` in `search-core`.
 
@@ -473,6 +479,15 @@ the scaling of the indexed closure is not measured here.
   delete relaxation. AIJ 221, 2015.
 - E. Karpas, C. Domshlak. Cost-optimal planning with landmarks. IJCAI 2009. (uniform and
   optimal cost partitioning, multi-path acceptance)
+- B. Bonet. An admissible heuristic for SAS+ planning obtained from the state equation.
+  IJCAI 2013.
+- F. Pommerening, G. Röger, M. Helmert, B. Bonet. LP-based heuristics for cost-optimal
+  planning. ICAPS 2014. (operator counting)
+- P. Haslum, H. Geffner. Admissible heuristics for optimal planning. AIPS 2000. (`h^m`)
+- P. Haslum, B. Bonet, H. Geffner. New admissible heuristics for domain-independent planning.
+  AAAI 2005. (additive `h^m`)
+- E. Keyder, H. Geffner. Heuristics for planning with action costs revisited. ECAI 2008.
+  (set-additive)
 - S. Richter, M. Helmert, M. Westphal. Landmarks revisited. AAAI 2008. (RHW landmarks)
 - J. Hoffmann, J. Porteous, L. Sebastia. Ordered landmarks in planning. JAIR 22, 2004.
   (reasonable orderings)
