@@ -176,42 +176,76 @@ replay handles repeated operators as above.
 
 ## Red-black (milestone 3, done)
 
-`RedBlack` (`h_RB`; Katz, Hoffmann & Domshlak 2013; Domshlak, Hoffmann & Katz 2015): black
-variables keep their deletes, the others are relaxed.
+`RedBlack` (`h_RB`): black variables keep their deletes, the others are relaxed. Sources:
+Katz, Hoffmann & Domshlak, *Who Said We Need to Relax All Variables?*, ICAPS 2013
+(red-black planning, complexity, reversibility); Katz, Hoffmann & Domshlak, *Red-Black
+Relaxed Plan Heuristics*, AAAI 2013 (RSE-invertibility, relaxed plan repair, paintings A and
+C); Domshlak, Hoffmann & Katz, *Red-Black Planning: A New Systematic Approach to Partial
+Delete Relaxation*, AIJ 221, 2015 (the journal version: Figures 4, 7 and 8, paintings L, A,
+C). All three were checked against the PDFs.
 
 - Painting: black variables must be state variables outside axioms and conditional effects
-  (as condition or effect), pairwise unlinked in `sas_plus::CausalGraph`. Then an operator
-  changes at most one black variable, and one that does has no precondition on another, so
-  paths for different black variables never interfere. `Painting::greedy` paints the eligible variables
-  with strongly connected DTGs, smallest domain first; `Painting::new` validates a given set
-  and reports `PaintingError`; `Painting::all_red` gives `h_FF`.
-- Plan repair: execute the `h_FF` relaxed plan under red-black semantics (red facts
+  (as condition or effect). `Painting::new` additionally requires them pairwise unlinked in
+  `sas_plus::CausalGraph` (the arcless fragment), `Painting::dag` an acyclic black causal
+  graph. Either way an operator changes at most one black variable (two black effects link
+  them both ways: the causal graph has effect-effect arcs). Neither checks RSE-invertibility;
+  every strategy constructor paints only RSE-invertible variables.
+- Strategies: `Painting::causal_graph_level` (L, or its inverse with `CausalLevel::Bottom`),
+  `Painting::incident_arcs` (A) and `Painting::conflict_directed` (C) follow Figure 8 of the
+  AIJ paper for a `Fragment` (`Arcless`: configuration E, `Dag`: configuration D).
+  `Painting::greedy` and `Painting::greedy_dag` are this crate's own (smallest domain
+  first, RSE-invertible candidates); `Painting::all_red` gives `h_FF`.
+- Plan repair (Figure 4): execute the `h_FF` relaxed plan under red-black semantics (red facts
   accumulate, each black variable has one value). Before each operator, move every black
   variable whose precondition value differs along a cheapest DTG path (Dijkstra over its
   values) using transitions whose red preconditions hold; at the end move the black goal
-  variables. Value = cost of the repaired plan.
-- If a needed path does not exist, the estimate falls back to `h_FF` (`RedBlackPlan::
-  is_repaired` is false). So `h_FF <= h_RB` always; dead ends are those of `h_FF`.
-- More paintings: `Painting::causal_graph_level(task, CausalLevel::{Top, Bottom})` paints by
-  longest-path level in the condensed causal graph (sources or sinks first);
-  `Painting::conflict_directed(task, state)` replays the relaxed plan of `state` with real
-  values and paints the variables with the most precondition and goal conflicts. Both are
-  inspired by the papers but not verified against their exact painting criteria (the AAAI
-  and AIJ texts were not reachable); both keep the repair's restrictions and use the same greedy
-  independence pass.
-- DAG fragment (Katz, Hoffmann & Domshlak 2013): `Painting::dag` allows black variables
-  linked in the causal graph if the graph on them is acyclic; `Painting::greedy_dag` paints
-  greedily under that rule. The repair then satisfies each transition's black preconditions
-  on causal-graph ancestors recursively, descendants first (an ancestor's move never changes a
-  descendant), under an operator budget; failure falls back to `h_FF`. Invertibility is not
-  required, so this is a best-effort repair, not the papers' polynomial guarantee.
-- Not done: black variables
-  with conditional effects, black derived variables, and semi-relaxed plan repair that
-  reorders the relaxed plan.
+  variables. With a DAG painting each transition's black preconditions on causal-graph
+  ancestors are satisfied recursively, descendants first (Figure 7), and only transitions of
+  the projected task `Π^B` are used: black preconditions and the reached value visited before.
+  Value = cost of the repaired plan.
+- If a needed path does not exist, or a DAG repair exceeds its operator budget, the estimate
+  falls back to `h_FF` (`RedBlackPlan::is_repaired` is false). Inside the fragment
+  (RSE-invertible black variables) a path always exists. So `h_FF <= h_RB` always (the
+  repaired plan contains the relaxed plan); dead ends are those of `h_FF` (Corollary 1).
+- Complexity: arcless, polynomial (paths are simple DTG paths). DAG: the papers' polynomial
+  bound (AAAI Theorem 2, AIJ Theorem 11) holds only under Chen & Giménez's succinct macro
+  plans; with explicit plans, as here and in the papers' implementation (AIJ Section 5.3.1),
+  Figure 7 is polynomial in the returned plan length, which is worst-case exponential
+  (Proposition 2). Hence the budget `1024 + 64 · |relaxed plan|` operators.
+- Not done: red facts following (`h^RB_follow`, AIJ Figure 6), relaxed plan forwarding (F)
+  and stop search (S) of the AAAI paper, painting strategies C[N], CA[p], RND and the inverses
+  of A and C, black variables with conditional effects, black derived variables, and the
+  fixed-number-of-black-variables fragment of the ICAPS paper (exponential in the product
+  of their domain sizes).
 
-Tests (for every painting strategy): `h_RB >= h_FF`, same dead ends, `all_red` equals `h_FF`,
-every repaired plan valid under an independent red-black simulator with matching cost; on gripper and courier the location
-variable is black and `h_RB > h_FF` on some states.
+### Paper comparison
+
+| Paper rule | Our code | Status |
+|---|---|---|
+| RB semantics: red values accumulate, black values switch; plan reaches the goal (ICAPS Def.) | `Repair::apply`, `holds` / `black` | matches |
+| Arcless black causal graph + RSE-invertible: plan generation polynomial (AAAI Cor. 2) | `Painting::new`, Dijkstra per black variable | matches |
+| Acyclic black causal graph + RSE-invertible: plan generation polynomial under succinct plans (AAAI Thm. 2, AIJ Thm. 11) | `Painting::dag`, explicit plans with a budget | deliberate deviation: explicit plans like the papers' implementation; budget guards exponential length |
+| Causal graph arcs include effect-effect pairs, so a black-acyclic operator changes one black variable | `sas_plus::CausalGraph` | matches |
+| RSE-invertible arc: an inverse arc with `ocon' ⊆ ocon ∪ oeff`; unconditioned operators induce arcs from every value | `painting/invertible.rs` | matches; only unconditional effects count |
+| Repair main loop: insert `ACHIEVE(pre(a_i)[V^B])` before each relaxed plan action, `ACHIEVE(G[V^B])` at the end (AIJ Fig. 4) | `Repair::run` | matches |
+| `Π^B` actions need `pre(a) ⊆ F` and black effect in `F` (visited facts) (AIJ Fig. 4) | `Repair::usable_in_dag` (DAG paintings) | bug fixed (80f486e): the DAG repair searched the whole DTG, asked ancestors for unvisited values and fell back to `h_FF` inside the fragment; regression test `dag_repair_stays_on_visited_values` |
+| Arcless case: Dijkstra over DTG arcs whose red outside conditions hold (AAAI, Implementation) | `Repair::cheapest_paths` without the `F` restriction | matches the AAAI text; deliberate deviation from AIJ Fig. 4's `D(v) ∩ F`: the unrestricted search only finds shorter paths, still valid |
+| `F` fixed per `ACHIEVE` call | `F` grows with red side effects of inserted moves | deliberate deviation: a superset of arcs over the same black values, so solvability is kept (AIJ 5.3.1 extends DTGs with red side effects too) |
+| `ACYCLIC PLANNING`: leaves to roots, shortest DTG path per required value, black outside conditions left to parents (AIJ Fig. 7) | recursive `move_black`, black preconditions sorted descendants first | matches (same operator order, computed on demand) |
+| No relaxed plan: `h = ∞`; otherwise repair succeeds (AIJ Sec. 5) | `None` for dead ends; `h_FF` fallback outside the fragment | matches in the fragment; fallback is our extension for user paintings |
+| Painting, Fig. 8: start red = not RSE-invertible or causal graph leaf; paint red until in fragment; post-process back to front | `painting/strategy.rs::paint` | matches; ineligible variables (axioms, conditional effects, derived) also start red, since the repair does not support them black |
+| L: paint red the highest causal graph level (closest to leaves) | `causal_graph_level(.., Top, ..)`, longest path from a source in the condensed causal graph, ties to the higher variable id | deliberate deviation: Fast Downward's cg-heuristic level is not available; for translator output the variable id follows that order |
+| L̄: lowest level first | `CausalLevel::Bottom` | matches (same level proxy) |
+| A: most incident arcs to black variables, ties smaller domain, then L | `incident_arcs` (each direction counts) | matches |
+| C: fewest conflicts (relaxed plan actions whose precondition on `v` is violated with only `v` black), ties L | `conflict_directed` | matches; the papers do not say what the value is after a violation: we assume it moved there, as the repair does. Was "inspired by" (counted goals, painted greedily black): replaced |
+| C uses the relaxed plan of the initial state | any `state` argument; dead end gives zero conflicts | deliberate generalisation |
+| Theorem 14: red leaves do not change `h^RB*` | applied by the three paper strategies only | greedy paintings may keep leaves black (harmless) |
+
+Tests (for every strategy in both fragments): `h_RB >= h_FF`, same dead ends, `all_red` equals
+`h_FF`, every repair succeeds, every repaired plan valid under an independent red-black
+simulator with matching cost, and every strategy raises `h_RB` above `h_FF` somewhere. Unit
+tests check RSE-invertibility on the SimpleGrid hand variable and the Figure 8 maximality
+post-process on a StarShapeLogistics-like task.
 
 ## Landmarks (milestones 4 and 5, done)
 
@@ -456,8 +490,8 @@ the scaling of the indexed closure is not measured here.
    (`benches/relaxation.rs`) against width-search's sweep. Indexed axiom closure in
    the plan replay done. Open: preferred operators, incremental evaluation hooks. Then propose the
    width-search switch.
-3. Red-black `h_RB` (greedy, causal-graph-level and conflict-directed painting, plan repair),
-   **done**.
+3. Red-black `h_RB` (greedy and the papers' L, A and C paintings for arcless and DAG
+   fragments, plan repair), **done**.
 4. LM-cut, **done** (`src/lm_cut.rs`): `h_max` from scratch per round, operator-level
    costs over effect rules; `LmCut::new` splits conditional operators by context (at most 64
    copies each, `src/lm_cut/contexts.rs`), so the cut sum dominates `h_max`; the
@@ -478,7 +512,7 @@ the scaling of the indexed closure is not measured here.
 - M. Helmert, C. Domshlak. Landmarks, critical paths and abstractions: what's the difference
   anyway? ICAPS 2009. (LM-cut)
 - S. Richter, M. Westphal. The LAMA planner. JAIR 39, 2010. (landmark count)
-- M. Katz, J. Hoffmann. Who said we need to relax all variables? ICAPS 2013.
+- M. Katz, J. Hoffmann, C. Domshlak. Who said we need to relax all variables? ICAPS 2013.
 - M. Katz, J. Hoffmann, C. Domshlak. Red-black relaxed plan heuristics. AAAI 2013.
 - C. Domshlak, J. Hoffmann, M. Katz. Red-black planning: a new systematic approach to partial
   delete relaxation. AIJ 221, 2015.

@@ -6,8 +6,11 @@ Heuristics for classical planning: red-black, FF, landmark and abstraction heuri
 
 - `h_max`, `h_add` and `h_FF` with relaxed plan extraction (delete relaxation); the
   set-additive `h_sa`; additive `h_max` over an operator partition; `h²` (no axioms)
-- Red-black heuristic `h_RB` by relaxed plan repair, painted greedily, by causal graph level,
-  conflict-directed or explicitly, with independent black variables or a black causal DAG
+- Red-black heuristic `h_RB` by relaxed plan repair (Katz, Hoffmann & Domshlak 2013;
+  Domshlak, Hoffmann & Katz 2015), checked against the papers: the L, A and C paintings of
+  the papers for an arcless or acyclic black causal graph over RSE-invertible variables (where
+  the repair succeeds, up to an operator budget for DAGs), plus greedy and explicit paintings; `h_FF` fallback outside
+  that fragment
 - `h^1` fact landmarks with natural orderings, and RHW back-chained landmarks with disjunctive
   and DTG landmarks, greedy-necessary and reasonable orderings; landmark count (inadmissible)
   and uniform landmark cost partitioning (admissible); optimal landmark cost partitioning by
@@ -19,7 +22,8 @@ Heuristics for classical planning: red-black, FF, landmark and abstraction heuri
   `sas_plus::Projection`, and (optional features) merge-and-shrink and saturated cost
   partitioning
 
-Not yet: preferred operators; `h²` with axioms.
+Not yet: preferred operators; `h²` with axioms; red facts following and the other
+red-black refinements listed in [docs/design.md](docs/design.md).
 
 The `Heuristic` trait, `heuristic_fn` and `HeuristicFn` are
 [search-core](https://github.com/sunsided/search-core)'s, re-exported from the crate root, so
@@ -40,6 +44,10 @@ search-core.
 
 ## Breaking changes
 
+- `Painting::causal_graph_level` and `Painting::conflict_directed` take a `Fragment` and follow
+  the papers' painting algorithm: candidates must be RSE-invertible (also for `greedy` and
+  `greedy_dag`), causal graph leaves stay red, `CausalLevel` names the end kept black, and
+  conflicts no longer count goals. Black sets differ from before.
 - `Heuristic`, `heuristic_fn` and `HeuristicFn` are now `search_core`'s (identical signatures;
   existing `use planning_heuristics::Heuristic` paths keep working).
 - The feature-gated heuristics of merge-and-shrink and cost-partition no longer implement
