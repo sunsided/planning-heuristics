@@ -94,9 +94,9 @@ fn sample_states(task: &Task) -> Vec<State> {
 fn bench_task(criterion: &mut Criterion, name: &str, task: &Task) {
     let states = sample_states(task);
     let mut group = criterion.benchmark_group(name);
-    bench_heuristic(&mut group, "h_max", &HMax::new(task), &states);
-    bench_heuristic(&mut group, "h_add", &HAdd::new(task), &states);
-    bench_heuristic(&mut group, "h_ff", &HFf::new(task), &states);
+    bench_heuristic(&mut group, "h_max", HMax::new(task), &states);
+    bench_heuristic(&mut group, "h_add", HAdd::new(task), &states);
+    bench_heuristic(&mut group, "h_ff", HFf::new(task), &states);
 
     let width = SasProblem::new(task);
     group.bench_function("width_search_h_add", |b| {
@@ -114,7 +114,7 @@ fn bench_task(criterion: &mut Criterion, name: &str, task: &Task) {
 fn bench_heuristic(
     group: &mut criterion::BenchmarkGroup<'_, criterion::measurement::WallTime>,
     label: &str,
-    heuristic: &impl Heuristic<State>,
+    mut heuristic: impl Heuristic<State>,
     states: &[State],
 ) {
     group.bench_function(label, |b| {

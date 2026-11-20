@@ -1,7 +1,7 @@
 //! The hand-encoded and translated `output.sas` fixtures copied from sas-plus (MIT OR
 //! Apache-2.0 only; see `tests/fixtures/README.md`).
 
-use planning_heuristics::HMax;
+use planning_heuristics::{HFf, HMax, Relaxation};
 use sas_plus::Task;
 use sas_plus::fdr::SasFile;
 
@@ -80,4 +80,24 @@ fn h_max_is_informative_on_gripper() {
     let task = load("gripper-costs");
     let value = HMax::new(&task).value(&task.initial_state());
     assert!(value.is_some_and(|v| v > 0));
+}
+
+/// One shared relaxation, one heuristic per thread: all threads agree with an owning one.
+#[test]
+fn shared_relaxation_across_threads() {
+    let task = load("translated-courier");
+    let relaxation = Relaxation::new(&task);
+    let states: Vec<_> = oracle::perfect(&task).into_keys().collect();
+    let mut owning = HFf::new(&task);
+    let expected: Vec<_> = states.iter().map(|s| owning.value(s)).collect();
+
+    std::thread::scope(|scope| {
+        for _ in 0..4 {
+            scope.spawn(|| {
+                let mut h_ff = HFf::with_relaxation(&relaxation);
+                let values: Vec<_> = states.iter().map(|s| h_ff.value(s)).collect();
+                assert_eq!(values, expected);
+            });
+        }
+    });
 }

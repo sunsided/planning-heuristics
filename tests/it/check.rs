@@ -12,9 +12,9 @@ use crate::oracle;
 /// Returns the number of states checked.
 pub fn check_task(name: &str, task: &Task) -> usize {
     task.validate().expect("test tasks are valid");
-    let h_max = HMax::new(task);
-    let h_add = HAdd::new(task);
-    let h_ff = HFf::new(task);
+    let mut h_max = HMax::new(task);
+    let mut h_add = HAdd::new(task);
+    let mut h_ff = HFf::new(task);
     let perfect = oracle::perfect(task);
 
     for (state, h_star) in &perfect {

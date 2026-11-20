@@ -140,7 +140,7 @@ fn u32_estimate_saturates() {
         vec![Fact::new(0, 1), Fact::new(1, 1)],
     );
     let state = task.initial_state();
-    let h_add = HAdd::new(&task);
+    let mut h_add = HAdd::new(&task);
 
     assert_eq!(h_add.value(&state), Some(2 * u64::from(u32::MAX)));
     assert_eq!(h_add.estimate(&state), Some(u32::MAX));

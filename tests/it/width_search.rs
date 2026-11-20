@@ -18,7 +18,7 @@ use crate::{fixtures, oracle};
 
 /// Compares both `h_add`s on every reachable state of `task`.
 fn compare(name: &str, task: &Task) {
-    let ours = HAdd::new(task);
+    let mut ours = HAdd::new(task);
     let theirs = SasProblem::new(task);
     let exact = task.axioms.is_empty() && !repeats_precondition(task);
 

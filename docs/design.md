@@ -22,9 +22,18 @@ private copy in `src/sas.rs` today (see `plan/status.md`).
 ```rust
 pub trait Heuristic<S, C = u32> {
     /// `None` = proven dead end.
-    fn estimate(&self, state: &S) -> Option<C>;
+    fn estimate(&mut self, state: &S) -> Option<C>;
 }
+
+impl<S, C, F: FnMut(&S) -> Option<C>> Heuristic<S, C> for F { /* calls F */ }
 ```
+
+`&mut self` lets a heuristic reuse working memory without interior mutability. A blanket
+`impl Heuristic for &mut H` cannot coexist with the closure impl: `&mut F` is itself `FnMut`,
+so the two overlap (E0119, checked with rustc 1.100). This crate keeps the closure blanket and
+adds explicit `impl Heuristic for &mut HMax<'_>` (and `HAdd`, `HFf`), which coherence allows
+because the types are local. heuristic-search should pick one of the two blankets too; other
+heuristics can always be passed as `|s| h.estimate(s)`.
 
 Same shape and semantics as `heuristic_search::Heuristic<S, C>` (draft branch): `Option<C>`,
 `None` only when no goal is reachable, `u32` as default cost. Rules for cost types:
@@ -84,10 +93,19 @@ order, "first" means the rule whose last condition closed first, then the lower 
 are final then, and so are the supporters and closing order of every closed fact, which is all
 relaxed plan extraction needs. Tests check that both give the same goal cost.
 
-Memory: `HMax`, `HAdd` and `HFf` keep a workspace (costs, supporters, counters, heap, closing
-order, plan buffers) in a `RefCell` and refill it in place per evaluation, so a state costs no
-allocation once the buffers have grown (`HFf::relaxed_plan` allocates only the returned
-operator list). The `RefCell` makes them `Send` but not `Sync`; clone one per thread.
+Memory: read-only tables and per-evaluation state are split. `Relaxation` holds the tables
+and is `Sync`. `HMax<'r>`, `HAdd<'r>` and `HFf<'r>` hold a `Cow<'r, Relaxation>` plus an owned
+workspace (costs, supporters, counters, queue, closing order, plan buffers), refilled in place
+per evaluation, so a state costs no allocation once the buffers have grown
+(`HFf::relaxed_plan` allocates only the returned operator list). Two constructors:
+
+- `HMax::new(&task) -> HMax<'static>` owns its relaxation: one line for one thread;
+- `HMax::with_relaxation(&relaxation) -> HMax<'r>` borrows a shared one: build the
+  `Relaxation` once (in an `Arc` if it must outlive a scope) and create one heuristic per
+  thread; creating one costs only empty buffers.
+
+A compile-time assertion in `lib.rs` checks `Relaxation: Sync` and the heuristics: `Send`; a
+test runs one shared relaxation on four threads.
 `Relaxation::explore` and `Relaxation::relaxed_plan` allocate a fresh workspace per call.
 The watcher lists are one flat array with per-fact offsets (CSR) instead of a vector per fact.
 
