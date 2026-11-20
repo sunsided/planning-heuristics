@@ -4,6 +4,7 @@
 //!
 //! See [`RedBlack`] for the repair and [`Painting`] for the choice of black variables.
 
+mod forward;
 mod painting;
 mod repair;
 mod tables;
@@ -32,7 +33,43 @@ pub struct RedBlackPlan {
     repaired: bool,
 }
 
+/// Options of [`RedBlack`], set with [`RedBlack::with_options`]; the default is plain relaxed
+/// plan repair.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
+pub struct RedBlackOptions {
+    /// Relaxed plan forwarding (option F of Katz, Hoffmann & Domshlak, AAAI 2013): before the
+    /// repair, move every operator without black effects as early in the relaxed plan as it
+    /// can go, so its red effects do not wait behind black moves. The repaired plan still
+    /// contains the relaxed plan, so `h_RB >= h_FF` still holds.
+    pub forward: bool,
+}
+
 impl RedBlackPlan {
+    /// Whether the plan is a real plan for `state` (all operators applicable under the
+    /// task's real semantics and the goal reached): the test behind option S, stop search,
+    /// of Katz, Hoffmann & Domshlak (AAAI 2013). A search that gets `true` can stop and
+    /// return its path to `state` followed by [`RedBlackPlan::ops`].
+    ///
+    /// `state` must have its derived variables evaluated (see [`Task::apply`]).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the plan names an operator `task` does not have, or `state` has fewer values
+    /// than the task has variables.
+    #[must_use]
+    pub fn is_plan_for(&self, task: &Task, state: &State) -> bool {
+        let mut current = state.clone();
+        for &op in &self.ops {
+            if !task.is_applicable(op, &current) {
+                return false;
+            }
+
+            current = task.apply(op, &current);
+        }
+
+        task.is_goal(&current)
+    }
+
     /// The operators in application order.
     #[must_use]
     pub fn ops(&self) -> &[OpId] {
@@ -137,6 +174,10 @@ pub struct RedBlack<'r> {
     workspace: Workspace,
     /// Working memory of the repair.
     repair: Repair,
+    /// The options.
+    options: RedBlackOptions,
+    /// The relaxed plan handed to the repair, forwarded if [`RedBlackOptions::forward`].
+    relaxed: Vec<OpId>,
 }
 
 impl RedBlack<'static> {
@@ -178,7 +219,34 @@ impl<'r> RedBlack<'r> {
             tables,
             workspace: Workspace::default(),
             repair: Repair::default(),
+            options: RedBlackOptions::default(),
+            relaxed: Vec::new(),
         }
+    }
+
+    /// The same heuristic with `options`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use planning_heuristics::{RedBlackOptions, RedBlack};
+    /// # let task = sas_plus::Task {
+    /// #     variables: vec![], operators: vec![], initial: sas_plus::State(vec![]),
+    /// #     goal: vec![], axioms: vec![],
+    /// # };
+    /// let h_rb = RedBlack::new(&task).with_options(RedBlackOptions { forward: true });
+    /// assert!(h_rb.options().forward);
+    /// ```
+    #[must_use]
+    pub fn with_options(mut self, options: RedBlackOptions) -> Self {
+        self.options = options;
+        self
+    }
+
+    /// The options.
+    #[must_use]
+    pub fn options(&self) -> RedBlackOptions {
+        self.options
     }
 
     /// The black variables, ascending.
@@ -224,9 +292,14 @@ impl<'r> RedBlack<'r> {
         let ff = self
             .relaxation
             .relaxed_plan_in(state, &mut self.workspace)?;
+        self.relaxed.clone_from(&self.workspace.plan);
+        if self.options.forward {
+            forward::forward(&self.tables, &mut self.relaxed);
+        }
+
         let repaired = self
             .repair
-            .run(&self.relaxation, &self.tables, state, &self.workspace.plan);
+            .run(&self.relaxation, &self.tables, state, &self.relaxed);
 
         Some(repaired.map_or((ff, false), |cost| (cost, true)))
     }

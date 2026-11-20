@@ -4,7 +4,7 @@
 use std::collections::BTreeSet;
 
 use planning_heuristics::{
-    CausalLevel, Fragment, HFf, Painting, PaintingError, RedBlack, Relaxation,
+    CausalLevel, Fragment, HFf, Painting, PaintingError, RedBlack, RedBlackOptions, Relaxation,
 };
 use sas_plus::random::{RandomTaskParams, random_task};
 use sas_plus::{Axiom, Effect, Fact, OpId, Operator, State, Task, Variable};
@@ -206,18 +206,49 @@ fn assert_each_matters(above: [usize; STRATEGIES.len()]) {
     }
 }
 
-/// Checks `h_RB` with `painting` on every reachable state of `task`; returns the number of
-/// states where the repaired plan costs more than `h_FF`.
-/// With `in_fragment` every repair must succeed; otherwise a failed repair must cost `h_FF`.
+/// The [`RedBlackOptions`] every painting is checked with, by label.
+const VARIANTS: [(&str, RedBlackOptions); 2] = [
+    ("repair", RedBlackOptions { forward: false }),
+    ("forward", RedBlackOptions { forward: true }),
+];
+
+/// Checks `h_RB` with `painting` under every entry of [`VARIANTS`]; returns the number of
+/// (variant, state) pairs where the red-black plan costs more than `h_FF`.
 fn check_painting(name: &str, task: &Task, painting: &Painting, in_fragment: bool) -> usize {
+    VARIANTS
+        .iter()
+        .map(|&(label, options)| {
+            check_variant(
+                &format!("{name}, {label}"),
+                task,
+                painting,
+                in_fragment,
+                options,
+            )
+        })
+        .sum()
+}
+
+/// Checks `h_RB` with `painting` and `options` on every reachable state of `task`; returns
+/// the number of states where the red-black plan costs more than `h_FF`.
+///
+/// With `in_fragment` every repair must succeed; otherwise a failed repair must cost `h_FF`.
+/// A plan that claims to be a real plan (stop search) must be one, checked against `h*`.
+fn check_variant(
+    name: &str,
+    task: &Task,
+    painting: &Painting,
+    in_fragment: bool,
+    options: RedBlackOptions,
+) -> usize {
     let relaxation = Relaxation::new(task);
     let mut h_ff = HFf::with_relaxation(&relaxation);
-    let mut h_rb = RedBlack::with_relaxation(task, &relaxation, painting);
+    let mut h_rb = RedBlack::with_relaxation(task, &relaxation, painting).with_options(options);
     let mut all_red = RedBlack::with_relaxation(task, &relaxation, &Painting::all_red());
     let black = h_rb.black_variables().to_vec();
     let mut above_ff = 0;
 
-    for state in oracle::perfect(task).keys() {
+    for (state, h_star) in &oracle::perfect(task) {
         let ctx = || format!("{name}, state {:?}, black {black:?}", state.0);
         let ff = h_ff.value(state);
         assert_eq!(all_red.value(state), ff, "all red is h_FF, {}", ctx());
@@ -245,6 +276,14 @@ fn check_painting(name: &str, task: &Task, painting: &Painting, in_fragment: boo
             "{}",
             ctx()
         );
+        if plan.is_plan_for(task, state) {
+            assert!(
+                h_star.is_some_and(|h| h <= plan.cost()),
+                "real plan cheaper than h* {h_star:?}, {}",
+                ctx()
+            );
+        }
+
         assert_eq!(
             oracle::plan_cost(task, plan.ops()),
             plan.cost(),
@@ -473,6 +512,15 @@ fn painting_strategies_hand_checked() {
     assert_eq!(HFf::new(&task).value(&state), Some(3));
     let mut h_rb = RedBlack::with_painting(&task, &conflicts);
     assert_eq!(h_rb.value(&state), Some(4));
+    let plan = h_rb.plan(&state).unwrap();
+    assert!(
+        plan.is_plan_for(&task, &state),
+        "stop search fires: {plan:?}"
+    );
+    let relaxed = RedBlack::with_painting(&task, &Painting::all_red())
+        .plan(&state)
+        .unwrap();
+    assert!(!relaxed.is_plan_for(&task, &state), "not real: {relaxed:?}");
 }
 
 /// A DAG painting: `b` can only move while `a = 1`, both black. The repair moves `a` up for

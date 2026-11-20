@@ -47,6 +47,12 @@ pub(super) struct Tables {
     pub linked: bool,
     /// The fact ids of the goal facts on red variables.
     pub red_goal: Vec<usize>,
+    /// For each operator, the fact ids of all its effects, conditional ones included.
+    pub adds: Vec<Vec<usize>>,
+    /// For each operator, the fact ids of its preconditions and effect conditions, ascending;
+    /// `None` if one is on a derived variable (axioms may achieve it, so relaxed plan
+    /// forwarding never moves the operator).
+    pub needs: Vec<Option<Vec<usize>>>,
 }
 
 impl Tables {
@@ -114,8 +120,36 @@ impl Tables {
             black_goal,
             red_goal,
             linked,
+            adds: task
+                .operators
+                .iter()
+                .map(|op| op.eff.iter().map(|e| relaxation.fact_id(e.fact)).collect())
+                .collect(),
+            needs: task
+                .operators
+                .iter()
+                .map(|op| needs(task, relaxation, op))
+                .collect(),
         }
     }
+}
+
+/// The fact ids `op` needs: preconditions and effect conditions, ascending; `None` if one is
+/// on a derived variable.
+fn needs(task: &Task, relaxation: &Relaxation, op: &sas_plus::Operator) -> Option<Vec<usize>> {
+    let facts = op
+        .pre
+        .iter()
+        .chain(op.eff.iter().flat_map(|e| &e.conditions));
+    if facts.clone().any(|f| task.variables[f.var].is_derived()) {
+        return None;
+    }
+
+    let mut ids: Vec<usize> = facts.map(|&f| relaxation.fact_id(f)).collect();
+    ids.sort_unstable();
+    ids.dedup();
+
+    Some(ids)
 }
 
 /// For each black variable, the operators that set it, with the value they require.

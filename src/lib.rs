@@ -104,7 +104,9 @@ pub use lm_cut::{ActionLandmark, LmCut};
 #[cfg(feature = "lp")]
 pub use operator_counting::{CountingConstraints, OperatorCounting};
 pub use path::{PathHeuristic, Stateless};
-pub use red_black::{CausalLevel, Fragment, Painting, PaintingError, RedBlack, RedBlackPlan};
+pub use red_black::{
+    CausalLevel, Fragment, Painting, PaintingError, RedBlack, RedBlackOptions, RedBlackPlan,
+};
 pub use relaxation::{Combine, Exploration, Relaxation, RelaxedPlan};
 pub use set_additive::HSetAdd;
 // The shared trait of the planning crates: `planning_heuristics::Heuristic` and
