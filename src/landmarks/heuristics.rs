@@ -16,6 +16,10 @@ use crate::{Heuristic, Relaxation};
 /// The landmark-count heuristic: the number of fact landmarks of the state that do not hold in
 /// it yet. Not admissible (one operator can achieve several landmarks) and blind to costs.
 ///
+/// The landmarks are recomputed from every evaluated state, so no search-path bookkeeping is
+/// needed. LAMA instead computes them once and tracks the landmarks each path has accepted,
+/// which needs a stateful extension of [`Heuristic`]; that is not done here.
+///
 /// # Examples
 ///
 /// ```

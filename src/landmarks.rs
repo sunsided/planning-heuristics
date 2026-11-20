@@ -1,27 +1,8 @@
 //! Fact landmarks of the delete relaxation (Zhu & Givan 2003; `h^m` landmarks with `m = 1`,
 //! Keyder, Richter & Helmert 2010) and the heuristics built on them.
 //!
-//! A fact landmark of a state is a fact that is true at some point of every plan from it. Each
-//! fact `f` gets a label: the facts that every relaxed path to `f` makes true no later than
-//! `f`. Facts of the state are labelled with themselves; a rule `conditions → f` offers
-//! `{f} ∪ ⋃ label(conditions)`, and the label of `f` is the intersection of all its offers.
-//! The greatest fixpoint is computed with a worklist that intersects labels until none
-//! shrinks. The landmarks are the goal facts and the union of their labels; each fact `l` in the label of a
-//! landmark `f` gives the natural ordering `l → f` (`l` holds in a state at or before the
-//! first state in which `f` holds).
-//!
-//! Every real plan is a relaxed plan, so these are landmarks of the task itself. The defaults
-//! of derived variables are free in the relaxation, but in a real state a default only holds
-//! when the axioms stop firing; a default that is not true in the state therefore gets the
-//! empty label and is claimed as a landmark only when it is a goal fact.
-//!
-//! ```mermaid
-//! graph LR
-//!     seed["state facts: label {f}; free defaults: label ∅"] --> work
-//!     work["worklist of facts whose label changed"] -->|watching rule fires| offer
-//!     offer["offer {head} ∪ labels of conditions"] -->|"intersect, shrank?"| work
-//!     work -->|empty| goal["landmarks = goal facts ∪ their labels"]
-//! ```
+//! See [`LandmarkGraph`] for the extraction, [`LandmarkCount`] and [`UniformLandmarkCost`] for
+//! the heuristics.
 
 mod heuristics;
 mod labels;
@@ -36,6 +17,28 @@ pub use heuristics::{LandmarkCount, UniformLandmarkCost};
 use labels::Labels;
 
 /// The fact landmarks of one state and their natural orderings.
+///
+/// A fact landmark of a state is a fact that is true at some point of every plan from it. Each
+/// fact `f` gets a label: the facts that every relaxed path to `f` makes true no later than
+/// `f`. Facts of the state are labelled with themselves; a rule `conditions → f` offers
+/// `{f} ∪ ⋃ label(conditions)`, and the label of `f` is the intersection of all its offers.
+/// The greatest fixpoint is computed with a worklist that intersects labels until none
+/// shrinks. The landmarks are the goal facts and the union of their labels; each fact `l` in the label of a
+/// landmark `f` gives the natural ordering `l → f` (`l` holds in a state at or before the
+/// first state in which `f` holds).
+///
+/// Every real plan is a relaxed plan, so these are landmarks of the task itself. The defaults
+/// of derived variables are free in the relaxation, but in a real state a default only holds
+/// when the axioms stop firing; a default that is not true in the state therefore gets the
+/// empty label and is claimed as a landmark only when it is a goal fact.
+///
+/// ```mermaid
+/// graph LR
+///     seed["state facts: label {f}; free defaults: label ∅"] --> work
+///     work["worklist of facts whose label changed"] -->|watching rule fires| offer
+///     offer["offer {head} ∪ labels of conditions"] -->|"intersect, shrank?"| work
+///     work -->|empty| goal["landmarks = goal facts ∪ their labels"]
+/// ```
 ///
 /// Fact ids are those of [`Relaxation::fact_id`]. Built by [`Relaxation::landmarks`].
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
