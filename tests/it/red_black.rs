@@ -155,6 +155,8 @@ fn paint(task: &Task, label: &str) -> Painting {
 /// Every strategy paints only RSE-invertible variables, so the repair must always succeed
 /// (Domshlak, Hoffmann & Katz 2015, Corollary 1 and Theorem 11).
 fn check_red_black(name: &str, task: &Task) -> [usize; STRATEGIES.len()] {
+    check_painting(&format!("{name}, any"), task, &any_dag(task), false);
+
     STRATEGIES.map(|label| {
         let painting = paint(task, label);
         let black = painting.black().to_vec();
@@ -164,8 +166,22 @@ fn check_red_black(name: &str, task: &Task) -> [usize; STRATEGIES.len()] {
             Painting::new(task, black).expect("strategies paint independently");
         }
 
-        check_painting(&format!("{name}, {label}"), task, &painting)
+        check_painting(&format!("{name}, {label}"), task, &painting, true)
     })
+}
+
+/// A DAG painting that ignores RSE-invertibility: every variable, in id order, that
+/// [`Painting::dag`] accepts. Its repairs may fail and fall back to `h_FF`.
+fn any_dag(task: &Task) -> Painting {
+    let mut black = Vec::new();
+    for v in 0..task.num_variables() {
+        black.push(v);
+        if Painting::dag(task, black.clone()).is_err() {
+            black.pop();
+        }
+    }
+
+    Painting::dag(task, black).expect("built from accepted sets")
 }
 
 /// Adds the per-strategy counts `b` to `a`.
@@ -192,8 +208,8 @@ fn assert_each_matters(above: [usize; STRATEGIES.len()]) {
 
 /// Checks `h_RB` with `painting` on every reachable state of `task`; returns the number of
 /// states where the repaired plan costs more than `h_FF`.
-/// The painting must be in the tractable fragment: every repair must succeed.
-fn check_painting(name: &str, task: &Task, painting: &Painting) -> usize {
+/// With `in_fragment` every repair must succeed; otherwise a failed repair must cost `h_FF`.
+fn check_painting(name: &str, task: &Task, painting: &Painting, in_fragment: bool) -> usize {
     let relaxation = Relaxation::new(task);
     let mut h_ff = HFf::with_relaxation(&relaxation);
     let mut h_rb = RedBlack::with_relaxation(task, &relaxation, painting);
@@ -218,11 +234,12 @@ fn check_painting(name: &str, task: &Task, painting: &Painting) -> usize {
             plan.cost(),
             ctx()
         );
-        assert!(
-            plan.is_repaired(),
-            "repair failed in the fragment, {}",
-            ctx()
-        );
+        if !plan.is_repaired() {
+            assert!(!in_fragment, "repair failed in the fragment, {}", ctx());
+            assert_eq!(plan.cost(), ff, "fallback is h_FF, {}", ctx());
+            continue;
+        }
+
         assert!(
             is_red_black_plan(task, &black, state, plan.ops()),
             "{}",
@@ -538,4 +555,37 @@ fn dag_repair_stays_on_visited_values() {
     assert!(plan.is_repaired());
     assert!(is_red_black_plan(&task, &[a, b], &state, plan.ops()));
     assert_eq!(plan.cost(), 22);
+}
+
+/// Regression: a conditional side effect does not count towards RSE-invertibility. Turning
+/// `v` on may set `u` (only if `c`, which never holds), and turning it off needs `u`; so `v`
+/// cannot move back and must not be painted black, or the repair falls back inside the
+/// claimed fragment.
+#[test]
+fn conditional_side_effects_do_not_invert() {
+    let (v, u, c, g) = (0, 1, 2, 3);
+    let up = op(
+        vec![Fact::new(v, 0)],
+        vec![
+            Effect::new(Fact::new(v, 1)),
+            Effect {
+                conditions: vec![Fact::new(c, 1)],
+                fact: Fact::new(u, 1),
+            },
+        ],
+    );
+    let down = op(
+        vec![Fact::new(v, 1), Fact::new(u, 1)],
+        vec![Effect::new(Fact::new(v, 0))],
+    );
+    let get_g = op(vec![Fact::new(v, 1)], vec![Effect::new(Fact::new(g, 1))]);
+    let mut task = binary_task(4, vec![up, down, get_g]);
+    task.goal = vec![Fact::new(g, 1), Fact::new(v, 0)];
+
+    assert_eq!(Painting::greedy(&task).black(), [] as [usize; 0]);
+    let explicit = Painting::new(&task, vec![v]).unwrap();
+    let plan = RedBlack::with_painting(&task, &explicit)
+        .plan(&task.initial_state())
+        .unwrap();
+    assert!(!plan.is_repaired());
 }

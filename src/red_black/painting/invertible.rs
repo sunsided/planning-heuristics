@@ -37,10 +37,17 @@ pub(super) fn is_rse_invertible(task: &Task, var: VarId) -> bool {
 }
 
 /// Whether `inverse` induces the arc `(to, inverse, from)` of `var`'s domain transition graph
-/// with an outside condition inside the outside condition and outside effect of `op`.
+/// with an outside condition inside the outside condition and unconditional outside effect of
+/// `op` (a conditional effect may not fire, so it cannot be relied on).
 fn inverts(inverse: &Operator, op: &Operator, var: VarId, from: u32, to: u32) -> bool {
     let starts_at_to = pre_on(inverse, var).is_none_or(|v| v == to);
-    let allowed = |f: &Fact| op.pre.contains(f) || op.eff.iter().any(|e| e.fact == *f);
+    let allowed = |f: &Fact| {
+        op.pre.contains(f)
+            || op
+                .eff
+                .iter()
+                .any(|e| e.conditions.is_empty() && e.fact == *f)
+    };
 
     effect_on(inverse, var) == Some(from)
         && starts_at_to
