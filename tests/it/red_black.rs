@@ -114,9 +114,12 @@ fn is_red_black_plan(task: &Task, black: &[usize], state: &State, plan: &[OpId])
     plan.iter().all(|&op| s.apply(op)) && task.goal.iter().all(|&g| s.holds(g))
 }
 
-/// Checks `h_RB` on every reachable state of `task`; returns the number of states where the
-/// repaired plan costs more than `h_FF`.
-fn check_red_black(name: &str, task: &Task) -> usize {
+/// The painting strategies checked, by label.
+const STRATEGIES: [&str; 4] = ["greedy", "top", "bottom", "conflicts"];
+
+/// Checks `h_RB` with every strategy on every reachable state of `task`; returns, per entry of
+/// [`STRATEGIES`], the number of states where the repaired plan costs more than `h_FF`.
+fn check_red_black(name: &str, task: &Task) -> [usize; STRATEGIES.len()] {
     let paintings = [
         ("greedy", Painting::greedy(task)),
         ("top", Painting::causal_graph_level(task, CausalLevel::Top)),
@@ -130,13 +133,32 @@ fn check_red_black(name: &str, task: &Task) -> usize {
         ),
     ];
 
-    paintings
-        .iter()
-        .map(|(label, painting)| {
-            Painting::new(task, painting.black().to_vec()).expect("strategies paint validly");
-            check_painting(&format!("{name}, {label}"), task, painting)
-        })
-        .sum()
+    paintings.map(|(label, painting)| {
+        Painting::new(task, painting.black().to_vec()).expect("strategies paint validly");
+        check_painting(&format!("{name}, {label}"), task, &painting)
+    })
+}
+
+/// Adds the per-strategy counts `b` to `a`.
+fn add(
+    mut a: [usize; STRATEGIES.len()],
+    b: [usize; STRATEGIES.len()],
+) -> [usize; STRATEGIES.len()] {
+    for (x, y) in a.iter_mut().zip(b) {
+        *x += y;
+    }
+
+    a
+}
+
+/// Asserts that every strategy on its own raised `h_RB` above `h_FF` somewhere.
+fn assert_each_matters(above: [usize; STRATEGIES.len()]) {
+    for (label, count) in STRATEGIES.iter().zip(above) {
+        assert!(
+            count > 0,
+            "{label}: black variables never mattered, {above:?}"
+        );
+    }
 }
 
 /// Checks `h_RB` with `painting` on every reachable state of `task`; returns the number of
@@ -187,19 +209,21 @@ fn check_painting(name: &str, task: &Task, painting: &Painting) -> usize {
     above_ff
 }
 
-/// Checks [`SEEDS`] random tasks generated with `params`; returns the number of states where
-/// `h_RB > h_FF`.
-fn check_random(label: &str, params: RandomTaskParams) -> usize {
+/// Checks [`SEEDS`] random tasks generated with `params`; returns, per strategy, the number of
+/// states where `h_RB > h_FF`.
+fn check_random(label: &str, params: RandomTaskParams) -> [usize; STRATEGIES.len()] {
     (0..SEEDS)
         .map(|seed| check_red_black(&format!("{label}, seed {seed}"), &random_task(seed, params)))
-        .sum()
+        .fold([0; STRATEGIES.len()], add)
 }
 
-/// Plain random tasks; the black variables make a difference on some states.
+/// Plain random tasks; with every strategy, the black variables make a difference on some
+/// states.
 #[test]
 fn red_black_on_random_plain_tasks() {
     let above = check_random("plain", RandomTaskParams::default());
-    assert!(above > 0, "black variables never mattered");
+    eprintln!("plain: {above:?}");
+    assert_each_matters(above);
 }
 
 /// Random tasks with conditional effects and axioms (their variables stay red).
@@ -217,14 +241,15 @@ fn red_black_on_random_mixed_tasks() {
     );
 }
 
-/// Every fixture; on the gripper and courier fixtures the black variables matter.
+/// Every fixture; with every strategy, the black variables matter on some states.
 #[test]
 fn red_black_on_fixtures() {
-    let above: usize = fixtures::FIXTURES
+    let above = fixtures::FIXTURES
         .iter()
         .map(|(name, _)| check_red_black(name, &fixtures::load(name)))
-        .sum();
-    assert!(above > 0, "black variables never mattered");
+        .fold([0; STRATEGIES.len()], add);
+    eprintln!("fixtures: {above:?}");
+    assert_each_matters(above);
 }
 
 /// A task over binary variables `v0..vn` with the given operators.
