@@ -3,7 +3,7 @@ name = "planning-heuristics"
 description = "Heuristics for classical planning: red-black, FF, landmark and abstraction heuristic adapters"
 version = "0.0.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.86"
 authors = ["Markus Mayer <widemeadows@gmail.com>"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/sunsided/planning-heuristics"
@@ -33,8 +33,7 @@ rustdoc-args = ["--html-in-header", "docs/mermaid.html"]
 merge-and-shrink = ["dep:merge-and-shrink"]
 ## Heuristic impls for cost-partition's saturated cost partitioning.
 cost-partition = ["dep:cost-partition"]
-## Optimal landmark cost partitioning by linear programming (microlp; pulls in std and
-## needs Rust 1.86).
+## Optimal landmark cost partitioning by linear programming (microlp; pulls in std).
 lp = ["dep:microlp"]
 
 # Sibling crates come from crates.io; local development patches them to the sibling working

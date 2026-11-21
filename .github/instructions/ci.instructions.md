@@ -23,10 +23,9 @@ applyTo: ".github/workflows/**,Taskfile.dist.yaml,**/Taskfile.dist.yaml,.pre-com
   verification job.
 - CI jobs: `branch`, `fmt`, `clippy`, `style`, `doc`, `test` (Linux only), `coverage`,
   `deny`, `msrv`, `semver`, `fuzz`, plus `actionlint` and `zizmor` in `actions-lint.yml`.
-- `msrv` checks the library only (`cargo hack check --rust-version --each-feature
-  --exclude-features lp,cost-partition`, no `--all-targets`): proptest 1.12 and width-search
-  need a newer Rust than the declared 1.85, and the `lp` and `cost-partition` features need
-  1.86 (README, MSRV). Do not add `--all-targets` or those features back.
+- `msrv` checks the library only (`cargo hack check --rust-version --each-feature`, no
+  `--all-targets`): proptest 1.12 and width-search need a newer Rust than the declared
+  1.86. Do not add `--all-targets` back.
 - `fuzz/` is a separate nightly workspace. Its tasks live in `fuzz/Taskfile.dist.yaml`,
   included as `fuzz:`; CI's `fuzz` job mirrors `task fuzz:build` and `task fuzz:lint`.
 - No `Cargo.lock` is tracked (root or `fuzz/`): this is a library, and local builds in the

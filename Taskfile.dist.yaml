@@ -164,8 +164,7 @@ tasks:
       - sh: cargo hack --version
         msg: "cargo-hack not found - cargo install --locked cargo-hack"
     cmds:
-      # lp (microlp) and cost-partition need Rust 1.86, so they stay out of the 1.85 check.
-      - cargo hack check --rust-version --workspace --ignore-private --each-feature --exclude-features lp,cost-partition
+      - cargo hack check --rust-version --workspace --ignore-private --each-feature
 
   semver:
     desc: Check published library crates for semver violations

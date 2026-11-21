@@ -187,9 +187,8 @@ jobs:
         with:
           tool: cargo-hack
       # Library only: dev-dependencies (proptest 1.12, width-search) need a newer Rust than users
-      # do, so no --all-targets. The lp (microlp) and cost-partition features need Rust 1.86 as
-      # well (README, MSRV), so they stay out of the 1.85 check.
-      - run: cargo hack check --rust-version --workspace --ignore-private --each-feature --exclude-features lp,cost-partition
+      # do, so no --all-targets.
+      - run: cargo hack check --rust-version --workspace --ignore-private --each-feature
 
   # Baseline: the published 0.0.0 placeholder on crates.io.
   semver:

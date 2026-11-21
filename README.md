@@ -102,9 +102,7 @@ these heuristics plug into every search crate built on it.
 
 ## MSRV
 
-Rust 1.85 for the library with default features and with `merge-and-shrink`. The features
-`cost-partition` and `lp` need Rust 1.86 (cost-partition and microlp require it). Tests and
-benches may need a newer Rust.
+Rust 1.86 for the library, with every feature. Tests and benches may need a newer Rust.
 
 ## Breaking changes
 
