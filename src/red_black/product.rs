@@ -83,102 +83,27 @@ impl Product {
     /// Panics if a variable of `black` is not a variable of `task`, or the product of their
     /// domain sizes does not fit a `u32`.
     pub fn new(task: &Task, relaxation: &Relaxation, black: &[VarId]) -> Self {
-        let mut strides = Vec::with_capacity(black.len());
-        let mut size: u32 = 1;
-        for &v in black {
-            strides.push((v, size));
-            size = size
-                .checked_mul(task.variables[v].domain_size)
-                .expect("the product fits u32");
-        }
-
-        let mut is_black_fact = alloc::vec![false; relaxation.num_facts()];
-        for &v in black {
-            for value in 0..task.variables[v].domain_size {
-                is_black_fact[relaxation.fact_id(Fact::new(v, value))] = true;
-            }
-        }
-
-        let index = |v: VarId| black.binary_search(&v).ok().map(|i| strides[i].1);
-        let digit = |x: u32, v: VarId| {
-            let i = black.binary_search(&v).expect("a black variable");
-            x / strides[i].1 % task.variables[v].domain_size
-        };
-        let mut matching = Vec::with_capacity(task.operators.len());
-        let mut next = Vec::with_capacity(task.operators.len());
-        for op in &task.operators {
-            let values: Vec<u32> = (0..size)
-                .filter(|&x| {
-                    op.pre
-                        .iter()
-                        .all(|f| index(f.var).is_none() || digit(x, f.var) == f.value)
-                })
-                .collect();
-            let black_eff: Vec<&Fact> = op
-                .eff
-                .iter()
-                .map(|e| &e.fact)
-                .filter(|f| index(f.var).is_some())
-                .collect();
-            let moved = if black_eff.is_empty() {
-                Vec::new()
-            } else {
-                values
-                    .iter()
-                    .map(|&x| {
-                        black_eff.iter().fold(x, |y, f| {
-                            let stride = index(f.var).expect("a black variable");
-                            y - digit(y, f.var) * stride + f.value * stride
-                        })
-                    })
-                    .collect()
-            };
-            matching.push(values);
-            next.push(moved);
-        }
-
-        let mut out = alloc::vec![Vec::new(); size as usize];
-        for (op, (from, to)) in matching.iter().zip(&next).enumerate() {
-            for (&x, &y) in from.iter().zip(to) {
-                if x != y {
-                    out[x as usize].push((op, y));
-                }
-            }
-        }
-
-        let goal_values = (0..size)
-            .map(|x| {
-                task.goal
-                    .iter()
-                    .all(|f| index(f.var).is_none() || digit(x, f.var) == f.value)
-            })
+        let encoding = Encoding::new(task, black);
+        let (matching, next) = encoding.transitions();
+        let out = out_edges(encoding.size, &matching, &next);
+        let goal_values = (0..encoding.size)
+            .map(|x| encoding.allows(x, &task.goal))
             .collect();
 
         Self {
+            is_black_fact: super::tables::black_fact_mask(task, relaxation, black),
             red_pre: task
                 .operators
                 .iter()
-                .map(|op| {
-                    op.pre
-                        .iter()
-                        .filter(|f| index(f.var).is_none())
-                        .map(|&f| relaxation.fact_id(f))
-                        .collect()
-                })
+                .map(|op| encoding.red_fact_ids(relaxation, &op.pre))
                 .collect(),
             cost: task.operators.iter().map(|op| u64::from(op.cost)).collect(),
-            red_goal: task
-                .goal
-                .iter()
-                .filter(|f| index(f.var).is_none())
-                .map(|&f| relaxation.fact_id(f))
-                .collect(),
-            is_black_fact,
             matching,
             next,
             out,
             goal_values,
-            strides,
+            red_goal: encoding.red_fact_ids(relaxation, &task.goal),
+            strides: encoding.strides,
         }
     }
 
@@ -424,4 +349,127 @@ fn enter(node: &mut Node, value: u32) {
         node.group_of[value as usize] = Some(node.groups.len());
         node.groups.push(alloc::vec![value]);
     }
+}
+
+/// The mixed-radix encoding of the black variables' values as one product value.
+struct Encoding<'t> {
+    /// The task whose variables are encoded.
+    task: &'t Task,
+    /// The black variables, ascending, with the stride of each in a product value.
+    strides: Vec<(VarId, u32)>,
+    /// The number of product values (the product of the black domain sizes).
+    size: u32,
+}
+
+impl<'t> Encoding<'t> {
+    /// Assigns strides to the black variables `black` (ascending) of `task`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a variable of `black` is not a variable of `task`, or the product of their
+    /// domain sizes does not fit a `u32`.
+    fn new(task: &'t Task, black: &[VarId]) -> Self {
+        let mut strides = Vec::with_capacity(black.len());
+        let mut size: u32 = 1;
+        for &v in black {
+            strides.push((v, size));
+            size = size
+                .checked_mul(task.variables[v].domain_size)
+                .expect("the product fits u32");
+        }
+
+        Self {
+            task,
+            strides,
+            size,
+        }
+    }
+
+    /// The stride of `v` in a product value, or `None` if `v` is red.
+    fn stride(&self, v: VarId) -> Option<u32> {
+        self.strides
+            .binary_search_by_key(&v, |&(var, _)| var)
+            .ok()
+            .map(|i| self.strides[i].1)
+    }
+
+    /// The value of the black variable `v` in the product value `x`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `v` is red.
+    fn digit(&self, x: u32, v: VarId) -> u32 {
+        let stride = self.stride(v).expect("a black variable");
+
+        x / stride % self.task.variables[v].domain_size
+    }
+
+    /// Whether the product value `x` agrees with every black fact of `facts`.
+    fn allows(&self, x: u32, facts: &[Fact]) -> bool {
+        facts
+            .iter()
+            .all(|f| self.stride(f.var).is_none() || self.digit(x, f.var) == f.value)
+    }
+
+    /// The fact ids of the red facts of `facts`.
+    fn red_fact_ids(&self, relaxation: &Relaxation, facts: &[Fact]) -> Vec<usize> {
+        facts
+            .iter()
+            .filter(|f| self.stride(f.var).is_none())
+            .map(|&f| relaxation.fact_id(f))
+            .collect()
+    }
+
+    /// The product value `x` with the black facts `black_eff` applied.
+    fn apply(&self, x: u32, black_eff: &[&Fact]) -> u32 {
+        black_eff.iter().fold(x, |y, f| {
+            let stride = self.stride(f.var).expect("a black variable");
+
+            y - self.digit(y, f.var) * stride + f.value * stride
+        })
+    }
+
+    /// For each operator of the task, the product values its black preconditions allow
+    /// (ascending), and the value each of them moves to (empty without black effects).
+    fn transitions(&self) -> (Vec<Vec<u32>>, Vec<Vec<u32>>) {
+        let operators = &self.task.operators;
+        let mut matching = Vec::with_capacity(operators.len());
+        let mut next = Vec::with_capacity(operators.len());
+        for op in operators {
+            let values: Vec<u32> = (0..self.size)
+                .filter(|&x| self.allows(x, &op.pre))
+                .collect();
+            let black_eff: Vec<&Fact> = op
+                .eff
+                .iter()
+                .map(|e| &e.fact)
+                .filter(|f| self.stride(f.var).is_some())
+                .collect();
+            let moved = if black_eff.is_empty() {
+                Vec::new()
+            } else {
+                values.iter().map(|&x| self.apply(x, &black_eff)).collect()
+            };
+
+            matching.push(values);
+            next.push(moved);
+        }
+
+        (matching, next)
+    }
+}
+
+/// For each of the `size` product values, the transitions leaving it as
+/// `(operator, value reached)`, from the per-operator `matching` and `next` values.
+fn out_edges(size: u32, matching: &[Vec<u32>], next: &[Vec<u32>]) -> Vec<Vec<(OpId, u32)>> {
+    let mut out = alloc::vec![Vec::new(); size as usize];
+    for (op, (from, to)) in matching.iter().zip(next).enumerate() {
+        for (&x, &y) in from.iter().zip(to) {
+            if x != y {
+                out[x as usize].push((op, y));
+            }
+        }
+    }
+
+    out
 }

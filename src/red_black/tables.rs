@@ -72,45 +72,20 @@ impl Tables {
     ///
     /// Panics if a variable of `black` is not a variable of `task`.
     pub fn new(task: &Task, relaxation: &Relaxation, black: &[VarId]) -> Self {
-        let index = |var: VarId| black.binary_search(&var).ok();
-        let mut is_black_fact = alloc::vec![false; relaxation.num_facts()];
-        for &var in black {
-            for value in 0..task.variables[var].domain_size {
-                is_black_fact[relaxation.fact_id(Fact::new(var, value))] = true;
-            }
-        }
-
-        let split = |facts: &[Fact]| -> (Vec<(usize, u32)>, Vec<usize>) {
-            let black_part = facts
-                .iter()
-                .filter_map(|f| index(f.var).map(|b| (b, f.value)))
-                .collect();
-            let red_part = facts
-                .iter()
-                .filter(|f| index(f.var).is_none())
-                .map(|&f| relaxation.fact_id(f))
-                .collect();
-            (black_part, red_part)
-        };
         let (level, linked) = black_levels(task, black);
         let by_level = |facts: &mut Vec<(usize, u32)>| {
             facts.sort_by_key(|&(b, _)| core::cmp::Reverse(level[b]));
         };
-        let (mut black_pre, red_pre): (Vec<_>, Vec<_>) =
-            task.operators.iter().map(|op| split(&op.pre)).unzip();
-        black_pre.iter_mut().for_each(by_level);
-        let black_eff = task
+
+        let (mut black_pre, red_pre): (Vec<_>, Vec<_>) = task
             .operators
             .iter()
-            .map(|op| {
-                op.eff
-                    .iter()
-                    .filter_map(|e| index(e.fact.var).map(|b| (b, e.fact.value)))
-                    .collect()
-            })
-            .collect();
-        let (mut black_goal, red_goal) = split(&task.goal);
+            .map(|op| split_facts(relaxation, black, &op.pre))
+            .unzip();
+        black_pre.iter_mut().for_each(by_level);
+        let (mut black_goal, red_goal) = split_facts(relaxation, black, &task.goal);
         by_level(&mut black_goal);
+
         let mut topological: Vec<usize> = (0..black.len()).collect();
         topological.sort_by_key(|&b| level[b]);
         let transitions = transitions(task, black);
@@ -120,13 +95,13 @@ impl Tables {
             .collect();
 
         Self {
-            is_black_fact,
+            is_black_fact: black_fact_mask(task, relaxation, black),
             black_offsets: black
                 .iter()
                 .map(|&v| relaxation.fact_id(Fact::new(v, 0)))
                 .collect(),
             black_pre,
-            black_eff,
+            black_eff: black_effects(task, black),
             red_pre,
             cost: task.operators.iter().map(|op| u64::from(op.cost)).collect(),
             distance: black
@@ -156,6 +131,61 @@ impl Tables {
                 .collect(),
         }
     }
+}
+
+/// Whether each fact (by [`Relaxation::fact_id`]) belongs to one of the variables `black`.
+///
+/// # Panics
+///
+/// Panics if a variable of `black` is not a variable of `task`.
+pub(super) fn black_fact_mask(task: &Task, relaxation: &Relaxation, black: &[VarId]) -> Vec<bool> {
+    let mut is_black_fact = alloc::vec![false; relaxation.num_facts()];
+    for &var in black {
+        for value in 0..task.variables[var].domain_size {
+            is_black_fact[relaxation.fact_id(Fact::new(var, value))] = true;
+        }
+    }
+
+    is_black_fact
+}
+
+/// Splits `facts` into the facts on the variables `black` (ascending), as
+/// `(black index, value)` in the order of `facts`, and the fact ids of the others.
+fn split_facts(
+    relaxation: &Relaxation,
+    black: &[VarId],
+    facts: &[Fact],
+) -> (Vec<(usize, u32)>, Vec<usize>) {
+    let black_part = facts
+        .iter()
+        .filter_map(|f| black.binary_search(&f.var).ok().map(|b| (b, f.value)))
+        .collect();
+    let red_part = facts
+        .iter()
+        .filter(|f| black.binary_search(&f.var).is_err())
+        .map(|&f| relaxation.fact_id(f))
+        .collect();
+
+    (black_part, red_part)
+}
+
+/// For each operator of `task`, its effects on the variables `black` (ascending) as
+/// `(black index, value)`.
+fn black_effects(task: &Task, black: &[VarId]) -> Vec<Vec<(usize, u32)>> {
+    task.operators
+        .iter()
+        .map(|op| {
+            op.eff
+                .iter()
+                .filter_map(|e| {
+                    black
+                        .binary_search(&e.fact.var)
+                        .ok()
+                        .map(|b| (b, e.fact.value))
+                })
+                .collect()
+        })
+        .collect()
 }
 
 /// The fact ids `op` needs: preconditions and effect conditions, ascending; `None` if one is
