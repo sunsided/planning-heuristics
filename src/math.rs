@@ -53,6 +53,8 @@ mod tests {
 
     extern crate std;
 
+    use proptest::prelude::*;
+
     use super::ln;
 
     /// Agrees with `std` across magnitudes, and handles the special values.
@@ -70,5 +72,20 @@ mod tests {
 
         assert_eq!(ln(0.0), f64::NEG_INFINITY);
         assert!(ln(-1.0).is_nan());
+    }
+
+    proptest! {
+        /// Agrees with `std` on every positive finite `f64`, subnormals included: any bit
+        /// pattern with the sign cleared, minus zero, infinity and NaN.
+        #[test]
+        fn matches_std_everywhere(bits in 1_u64..0x7ff0_0000_0000_0000) {
+            let x = f64::from_bits(bits);
+            let (ours, theirs) = (ln(x), x.ln());
+
+            prop_assert!(
+                (ours - theirs).abs() <= 1e-14 * theirs.abs().max(1.0),
+                "{x}: {ours} vs {theirs}"
+            );
+        }
     }
 }
