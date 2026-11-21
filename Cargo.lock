@@ -199,6 +199,8 @@ checksum = "7f8f80099a98041a3d1622845c271458a2d73e688351bf3cb999266764b81d48"
 [[package]]
 name = "cost-partition"
 version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c93a12998e6f6692f252a3f722a7b09e500502731ed25dde8c1dfb9b595ecd5d"
 dependencies = [
  "sas-plus",
 ]
@@ -417,6 +419,8 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 [[package]]
 name = "merge-and-shrink"
 version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0d530e14999078f0d70a19d9c79ca4c2698d5d86e1e1ca603bbb6c0573e52230"
 dependencies = [
  "sas-plus",
 ]
@@ -693,10 +697,14 @@ dependencies = [
 [[package]]
 name = "sas-plus"
 version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "67e957c1ba37aeb6902cab664d602b980faf802cca5012b88837d00fab9e2e7b"
 
 [[package]]
 name = "search-core"
 version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ff8359531c335b0cde4874ad128a2b0856663c40bc67d7757255716fdff6ef45"
 
 [[package]]
 name = "serde"
@@ -934,6 +942,8 @@ dependencies = [
 [[package]]
 name = "width-search"
 version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "88f379087600ad8c9863d8d38819a097f07a0a9bebea4b7da3b3bba7b34be448"
 dependencies = [
  "sas-plus",
 ]
