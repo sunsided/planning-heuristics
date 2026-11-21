@@ -10,6 +10,20 @@
 
 Heuristics for classical planning: red-black, FF, landmark and abstraction heuristic adapters.
 
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+
+- [Usage](#usage)
+- [Scope](#scope)
+- [Features](#features)
+- [MSRV](#msrv)
+- [Breaking changes](#breaking-changes)
+- [Status](#status)
+- [License](#license)
+- [Contributing](#contributing)
+
+<!-- END doctoc -->
+
 ## Usage
 
 ```rust

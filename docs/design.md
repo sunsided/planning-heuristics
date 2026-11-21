@@ -2,6 +2,33 @@
 
 Status: draft, milestones 1 to 7 implemented (branch `draft/initial`). Version stays 0.0.0.
 
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+
+- [Scope](#scope)
+- [Heuristic trait](#heuristic-trait)
+- [Delete relaxation (milestone 1)](#delete-relaxation-milestone-1)
+  - [Relaxation](#relaxation)
+  - [Worklist (Knuth / generalized Dijkstra)](#worklist-knuth--generalized-dijkstra)
+  - [h_FF and relaxed plan extraction](#h_ff-and-relaxed-plan-extraction)
+  - [Axioms](#axioms)
+  - [Conditional effects](#conditional-effects)
+- [Red-black (milestone 3, done)](#red-black-milestone-3-done)
+  - [Paper comparison](#paper-comparison)
+- [Landmarks (milestones 4 and 5, done)](#landmarks-milestones-4-and-5-done)
+- [Relevance score (done)](#relevance-score-done)
+- [Goal intention (done)](#goal-intention-done)
+- [Adapters (done)](#adapters-done)
+- [How width-search would migrate](#how-width-search-would-migrate)
+- [How miniplan would migrate](#how-miniplan-would-migrate)
+- [Cross-crate needs](#cross-crate-needs)
+- [Testing strategy](#testing-strategy)
+- [Benchmark](#benchmark)
+- [Milestones](#milestones)
+- [References](#references)
+
+<!-- END doctoc -->
+
 ## Scope
 
 Goal-distance heuristics for classical planning over `sas_plus::Task` (0.2.1):
