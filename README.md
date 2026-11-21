@@ -1,6 +1,46 @@
 # planning-heuristics
 
+[![crates.io](https://img.shields.io/crates/v/planning-heuristics.svg)](https://crates.io/crates/planning-heuristics)
+[![docs.rs](https://img.shields.io/docsrs/planning-heuristics)](https://docs.rs/planning-heuristics)
+[![CI](https://github.com/sunsided/planning-heuristics/actions/workflows/ci.yml/badge.svg)](https://github.com/sunsided/planning-heuristics/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/sunsided/planning-heuristics/graph/badge.svg)](https://codecov.io/gh/sunsided/planning-heuristics)
+[![MSRV](https://img.shields.io/crates/msrv/planning-heuristics)](https://crates.io/crates/planning-heuristics)
+[![License](https://img.shields.io/crates/l/planning-heuristics)](https://github.com/sunsided/planning-heuristics#license)
+[![unsafe forbidden](https://img.shields.io/badge/unsafe-forbidden-success.svg)](https://github.com/rust-secure-code/safety-dance/)
+
 Heuristics for classical planning: red-black, FF, landmark and abstraction heuristic adapters.
+
+## Usage
+
+```rust
+use planning_heuristics::{HAdd, HFf, HMax, Heuristic, Relaxation};
+use sas_plus::{Effect, Fact, Operator, State, Task, Variable};
+
+// One binary variable, one operator that sets it, goal `v0 = 1`.
+let task = Task {
+    variables: vec![Variable::new("v0", 2)],
+    operators: vec![Operator {
+        name: "set".into(),
+        pre: vec![Fact::new(0, 0)],
+        eff: vec![Effect::new(Fact::new(0, 1))],
+        cost: 3,
+    }],
+    initial: State(vec![0]),
+    goal: vec![Fact::new(0, 1)],
+    axioms: vec![],
+};
+let state = task.initial_state();
+
+// Each heuristic owns its relaxation ...
+assert_eq!(HMax::new(&task).estimate(&state), Some(3));
+
+// ... or borrows a shared one; one heuristic per thread, the relaxation is `Sync`.
+let relaxation = Relaxation::new(&task);
+let mut h_add = HAdd::with_relaxation(&relaxation);
+let mut h_ff = HFf::with_relaxation(&relaxation);
+assert_eq!(h_add.estimate(&state), Some(3));
+assert_eq!(h_ff.value(&state), Some(3_u64));
+```
 
 ## Scope
 
@@ -30,7 +70,7 @@ Heuristics for classical planning: red-black, FF, landmark and abstraction heuri
   partitioning
 
 Not yet: preferred operators; `h²` with axioms; succinct macro plans for red-black DAGs and
-the other gaps listed in [docs/design.md](docs/design.md).
+the other gaps listed in [docs/design.md](https://github.com/sunsided/planning-heuristics/blob/main/docs/design.md).
 
 The `Heuristic` trait, `heuristic_fn` and `HeuristicFn` are
 [search-core](https://github.com/sunsided/search-core)'s, re-exported from the crate root, so
@@ -44,10 +84,13 @@ these heuristics plug into every search crate built on it.
   `MaxOverOrders`.
 - `lp`: `OptimalLandmarkCost`, the optimal landmark cost partitioning, and
   `OperatorCounting`, the state equation with LM-cut constraints, solved with the
-  pure-Rust `microlp`. It needs `std` and Rust 1.86 (the rest of the crate: 1.85).
+  pure-Rust `microlp`. It needs `std`.
 
-The first two depend on unreleased versions of those crates (path dependencies for now), as does
-search-core.
+## MSRV
+
+Rust 1.85 for the library with default features and with `merge-and-shrink`. The features
+`cost-partition` and `lp` need Rust 1.86 (cost-partition and microlp require it). Tests and
+benches may need a newer Rust.
 
 ## Breaking changes
 
@@ -65,13 +108,23 @@ search-core.
 ## Status
 
 Pre-release, version 0.0.0, `no_std` with `alloc`. The API will change; see
-[docs/design.md](docs/design.md).
+[docs/design.md](https://github.com/sunsided/planning-heuristics/blob/main/docs/design.md).
 
 ## License
 
 Licensed under either of
 
-- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
-- MIT license ([LICENSE-MIT](LICENSE-MIT))
+- Apache License, Version 2.0 ([LICENSE-APACHE](https://github.com/sunsided/planning-heuristics/blob/main/LICENSE-APACHE))
+- MIT license ([LICENSE-MIT](https://github.com/sunsided/planning-heuristics/blob/main/LICENSE-MIT))
 
 at your option.
+
+Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion
+in this work by you, as defined in the Apache-2.0 license, shall be dual licensed as above,
+without any additional terms or conditions.
+
+## Contributing
+
+See [CONTRIBUTING.md](https://github.com/sunsided/planning-heuristics/blob/main/CONTRIBUTING.md). Local development expects the sibling
+repositories search-core, merge-and-shrink, cost-partition and width-search checked out next
+to this one.
