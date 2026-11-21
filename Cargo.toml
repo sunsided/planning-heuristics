@@ -11,6 +11,10 @@ readme = "README.md"
 keywords = ["planning", "heuristic", "sas", "red-black", "landmarks"]
 categories = ["algorithms", "science", "no-std"]
 
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--html-in-header", "docs/mermaid.html"]
+
 [features]
 ## Heuristic impl for merge-and-shrink's MergeAndShrinkHeuristic.
 merge-and-shrink = ["dep:merge-and-shrink"]
