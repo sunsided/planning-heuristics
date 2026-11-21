@@ -438,9 +438,9 @@ regression). It can switch only after it grounds to `sas_plus::Task` (roadmap op
 
 ## Cross-crate needs
 
-- **width-search**: release `SasProblem::h_add` (local branch `feature/public-h-add`) so the
-  comparison test can run in CI. Its `h_add` sums duplicated rule conditions twice and lacks
-  free derived defaults (see Testing); both go away when it switches to this crate.
+- **width-search**: none required; 0.3 ships `SasProblem::h_add`, so the comparison test
+  runs in CI. Its `h_add` sums duplicated rule conditions twice and lacks free derived
+  defaults (see Testing); both go away when it switches to this crate.
 - **sas-plus**: none required. Nice to have: DTGs (red-black builds its own),
   indexed axiom evaluation (would replace the `close_axioms` rescans here).
 - **search-core**: publish 0.1; this crate re-exports its `Heuristic` and depends on it by
@@ -492,14 +492,12 @@ The dev-dependency is
 
 ```toml
 [dev-dependencies]
-width-search = { path = "../width-search", version = "0.2.0", features = ["sas-plus"] }
+width-search = { path = "../width-search", version = "0.3", features = ["sas-plus"] }
 ```
 
-`SasProblem::h_add` exists only on the local, unpushed width-search branch
-`feature/public-h-add`, so the comparison runs only against that local checkout. Before it can
-run in CI (or in a fresh clone), width-search needs a release with `h_add`; then bump `version`
-to it. `cargo publish` keeps only the `version` of a dev-dependency and drops the `path`, so the
-published manifest stays valid once that version exists on crates.io.
+`SasProblem::h_add` is public since width-search 0.3. `cargo publish` keeps only the
+`version` of a dev-dependency and drops the `path`, so the published manifest resolves against
+crates.io.
 
 ## Benchmark
 
