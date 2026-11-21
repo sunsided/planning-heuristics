@@ -11,6 +11,7 @@ Goal-distance heuristics for classical planning over `sas_plus::Task` (0.2.1):
 - red-black partial delete relaxation (`h_RB`);
 - landmarks: LM-cut, `h^1` and RHW landmarks with disjunctions and reasonable orderings,
   landmark count, uniform and optimal (LP) cost partitioning, path-dependent tracking;
+- landmark-like relevance scores (`h_Ξ`);
 - adapters (optional features) for `merge-and-shrink` and `cost-partition`.
 
 Out of scope: search algorithms (`heuristic-search`, `width-search`), grounding (`pddl-rs`),
@@ -334,6 +335,51 @@ red facts following find the optimal plan where repair over-estimates.
 - Open: optimal partitioning over action landmarks (LM-cut's cuts) or the tracked
   landmarks, `PathHeuristic` in `search-core`.
 
+## Relevance score (done)
+
+`RelevanceScore` (`h_Ξ`): Kim & Sridharan, *Relevance Score: A Landmark-Like Heuristic for
+Planning*, arXiv:2403.07510, 2024. Checked against the paper's text. Not admissible (one
+operator achieving three goal facts: `h_Ξ = 3`, `h* = 1`); `0` exactly at goal states.
+
+| Paper rule | Our code | Status |
+|---|---|---|
+| Backtracking tree: root `achieveGoal` with the goals, fact → achieving actions, action → preconditions (Sec. 3.4) | `relevance/tree.rs` over the `Relaxation` rules (operator effects and axioms are the actions; conditions are preconditions plus effect conditions) | matches for STRIPS; conditional effects and axioms are our generalisation |
+| An action is excluded below fact `f` if a precondition labels a node on `path(f)` (Sec. 3.4) | `child_labels` (the path includes `f`) | matches |
+| NDA: one achiever uniformly at a fact, all preconditions at an action (Alg. 1, Sec. 3.5) | defines the recursion | matches |
+| Eq. 2 (fact: average over children), Eq. 3 (action: `1 − Π(1 − Ξ)`), `Ξ(l, n) = 1` at own label | `combine`, bottom-up per state | matches; verified against an independent enumeration of the agent's outcomes |
+| Eqs. 5–7 and LCA-based computation (Sec. 4.1, 4.3) | not used | deliberate deviation: Eq. 7 is a rewriting of Eqs. 2–3, so the direct recursion gives the same values on the same explored tree |
+| Alg. 2: dives from frontier nodes chosen ∝ `ξ`, children added, one chosen ∝ `ξ`; loop while `|T| < 100 000` or frontier mass / explored mass `> ρ = 0.2` | `Tree::explore`, `RelevanceParams` (defaults 100 000, 0.2) | matches, plus: a childless node leaves the frontier (the printed loop never ends otherwise), stop on an empty frontier, `max_nodes` (400 000) caps memory |
+| Partial tree gives lower bounds (Sec. 4.2) | unexplored nodes count 0 | matches; tested (partial ≤ full) |
+| `T/σ` removes the nodes labelled with facts of `σ` and their descendants; `h_Ξ(σ) = Σ_l Ξ_σ(l)` (Sec. 4.4) | `is_removed` (free facts count as true) | matches the formula (open question: the prose says the agent "stops at" such nodes, which would keep them; the formula is the one that gives `h = 0` at goals) |
+| Rounded to the nearest integer for LAMA (Sec. 4.4) | `Heuristic::estimate` | matches |
+| Every state gets a score | `None` for relaxed dead ends | deliberate addition |
+| Discussion: landmarks score 1 on a full tree | not true in general | a landmark scores 1/2 when the other achiever of the goal has an unachievable precondition (test `landmarks_can_score_below_one`); the score is a sampling probability, not a fraction of plans |
+
+## Goal intention (done)
+
+`GoalIntention`, `IntentionTracker`: Rosa, Honorio, Lipovetzky & Sardiña, *Planning as Goal
+Recognition: Deriving Heuristics from Intention Models* (extended version),
+arXiv:2603.14824, 2026. Checked against the paper's text; the sampler comes from its
+Appendix B, which adapts Wilken et al. (ECAI 2024), not read here. Ranking keys, not
+distances: not admissible, growing with the path, never a dead end.
+
+| Paper rule | Our code | Status |
+|---|---|---|
+| Fact probabilities from 100 sampled relaxed plans at the initial state | `IntentionParams::samples = 100`, `GoalIntention::new` | matches |
+| Alg. 2: all goal facts in `C`; layers from the top; achievers of minimum `h_add` in the layer, then minimum count, then random; preconditions not in `s0`, not found, not in `C` go to `newC`; `add(a)` leaves `C` and `newC` | `intention/sampling.rs` | reconstructed: goal facts already true are not queued; layers count axioms as steps; "achievers at the layer" means achievers whose highest condition is at most that layer (any reachable one if none); `add(a)` means effects certain to fire with the chosen effect; a supporter's own preconditions stay queued (the printed lines drop them, which produced non-plans on random tasks; caught by `samples_are_relaxed_plans`) |
+| `P(a)` from the samples; a fact's probability "of not observing any supporter action" | `P(a)` = fraction of samples containing `a`; `P(q) = 1 − Π (1 − P(a))` over its achievers | reconstructed (one sentence in the paper); a fact supported in every sample can get less than 1, as the paper notes (doc example: 0.75) |
+| `P(q | ¬G)` from samples achieving every achievable non-goal fact | same sampler with those targets | matches |
+| `ol_rp`: `P̃(O_F | G) = Π P(q | G)`, ranked by the sum of log probabilities | `likelihood_cost` = `−Σ ln P` | matches (lower cost = higher likelihood) |
+| `op_rp`: `Σ ln P(q | G) − ln P(q | ¬G)` | `posterior_cost` (negated) | matches; zero probabilities give `±∞`, never NaN (our rule) |
+| Observations: facts added by the observed actions | `IntentionTracker::on_expand`: heads of the effects that fire | matches |
+| `_r` variants: only facts observed since the last `h_GC` improvement | `restart: true` | matches |
+| UTP re-weighting of samples (OL-UTP) | not built | underspecified for relaxed plans (which state's applicable actions?) |
+| BFWS integration (third tie-breaker) | not built | search is out of scope; the tracker is the hook |
+| Claim 1, Claim 2 | tests on the implemented likelihood | hold |
+| Theorem 4 / Eq. 7 (`KL = −ln ρ(y* | G)`) | test by enumeration over an intermediate domain | holds |
+| Lemma 1, Claims 1–2 for the plan-library model (uniform weights) | test-only enumeration on tiny tasks | hold (checks the paper's arithmetic, not the crate) |
+| Theorems 1–3, Lemmas 2–4 (search behaviour) | not tested | need a search |
+
 ## Adapters (done)
 
 - `AbstractionHeuristic<A: sas_plus::Abstraction>`: goal distances under given costs (a cost
@@ -581,6 +627,13 @@ the scaling of the indexed closure is not measured here.
 - S. Richter, M. Helmert, M. Westphal. Landmarks revisited. AAAI 2008. (RHW landmarks)
 - J. Hoffmann, J. Porteous, L. Sebastia. Ordered landmarks in planning. JAIR 22, 2004.
   (reasonable orderings)
+- O. Kim, M. Sridharan. Relevance score: a landmark-like heuristic for planning.
+  arXiv:2403.07510, 2024. (`h_Ξ`)
+- G. Rosa, J. Honorio, N. Lipovetzky, S. Sardiña. Planning as goal recognition: deriving
+  heuristics from intention models (extended version). arXiv:2603.14824, 2026. (`ol_rp`,
+  `op_rp`)
+- N. Wilken, L. Cohausz, C. Bartelt, H. Stuckenschmidt. Fact probability vector based goal
+  recognition. ECAI 2024. (supporter sampling, via Rosa et al.)
 - L. Zhu, R. Givan. Landmark extraction via planning graph propagation. ICAPS doctoral
   consortium 2003. (`h^1` labels)
 - G. Röger, F. Pommerening, M. Helmert. Optimal planning in the presence of conditional

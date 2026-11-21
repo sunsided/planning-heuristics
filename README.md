@@ -21,6 +21,10 @@ Heuristics for classical planning: red-black, FF, landmark and abstraction heuri
   inadmissible count or admissible uniform cost partitioning
 - LM-cut (`h_LM-cut`), admissible, with axioms, and conditional effects by context splitting;
   also from seeded start costs per fact and per-call operator costs (`LmCut::value_seeded`)
+- The relevance score `h_Ξ` (Kim & Sridharan 2024), landmark-like and inadmissible, over a
+  partially explored backtracking tree
+- Goal-intention ranking keys `ol_rp` / `op_rp` (Rosa et al. 2026) from sampled relaxed plans,
+  with a path tracker (`IntentionTracker`)
 - Abstraction heuristics: any `sas_plus::Abstraction`, pattern databases over
   `sas_plus::Projection`, and (optional features) merge-and-shrink and saturated cost
   partitioning
