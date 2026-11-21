@@ -37,14 +37,16 @@ cost-partition = ["dep:cost-partition"]
 ## needs Rust 1.86).
 lp = ["dep:microlp"]
 
+# Sibling crates come from crates.io; local development patches them to the sibling working
+# trees through the planning hub's .cargo/config.toml (see CONTRIBUTING.md).
 [dependencies]
 # The shared Heuristic trait, re-exported from the crate root (see docs/design.md).
-search-core = { path = "../search-core", version = "0.3" }
+search-core = "0.3"
 sas-plus = { version = "0.2.1", default-features = false }
 # MergeAndShrinkHeuristic::value needs 0.3 (see docs/design.md).
-merge-and-shrink = { path = "../merge-and-shrink", version = "0.3.0", default-features = false, optional = true }
+merge-and-shrink = { version = "0.3.0", default-features = false, optional = true }
 # MaxOverOrders needs 0.2 (see docs/design.md).
-cost-partition = { path = "../cost-partition", version = "0.2.0", default-features = false, optional = true }
+cost-partition = { version = "0.2.0", default-features = false, optional = true }
 
 # Pure-Rust simplex; std only, so it stays behind the `lp` feature.
 microlp = { version = "0.8.0", optional = true }
@@ -54,7 +56,7 @@ criterion = { version = "0.8.2", default-features = false }
 proptest = "1.12"
 sas-plus = { version = "0.2.1", features = ["fdr", "random"] }
 # Needs SasProblem::h_add, which width-search ships since 0.3 (see docs/design.md).
-width-search = { path = "../width-search", version = "0.3", features = ["sas-plus"] }
+width-search = { version = "0.3", features = ["sas-plus"] }
 
 [lints.rust]
 missing_docs = "warn"

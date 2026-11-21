@@ -125,6 +125,5 @@ without any additional terms or conditions.
 
 ## Contributing
 
-See [CONTRIBUTING.md](https://github.com/sunsided/planning-heuristics/blob/main/CONTRIBUTING.md). Local development expects the sibling
-repositories search-core, merge-and-shrink, cost-partition and width-search checked out next
-to this one.
+See [CONTRIBUTING.md](https://github.com/sunsided/planning-heuristics/blob/main/CONTRIBUTING.md),
+including how to build against local checkouts of the sibling crates.

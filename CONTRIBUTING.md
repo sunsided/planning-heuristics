@@ -5,21 +5,20 @@ needs before it can be merged.
 
 ## Setup
 
-1. Check out the sibling repositories next to this one:
-   [search-core](https://github.com/sunsided/search-core),
+1. The sibling crates [search-core](https://github.com/sunsided/search-core),
+   [sas-plus](https://github.com/sunsided/sas-plus),
    [merge-and-shrink](https://github.com/sunsided/merge-and-shrink),
-   [cost-partition](https://github.com/sunsided/cost-partition) (both optional features) and
-   [width-search](https://github.com/sunsided/width-search) (a dev-dependency). They are path
-   dependencies, and Cargo fails when one is missing, even for a feature that is off:
+   [cost-partition](https://github.com/sunsided/cost-partition) and
+   [width-search](https://github.com/sunsided/width-search) are ordinary crates.io
+   dependencies, so a plain clone builds, and CI and Dependabot resolve them from crates.io.
+   To develop against their working trees instead, keep this repository inside the planning
+   hub directory next to them: the hub's untracked `.cargo/config.toml` patches them
+   (`[patch.crates-io]`) to the local checkouts. A patch whose local version does not match
+   the requirement is unused (cargo warns), and crates.io is used for that crate.
 
-   ```sh
-   for repo in search-core merge-and-shrink cost-partition width-search; do
-     git clone "https://github.com/sunsided/$repo" "../$repo"
-   done
-   ```
-
-   CI does the same through `.github/actions/checkout-siblings`, at each sibling's default
-   branch.
+   The patch rewrites their `Cargo.lock` entries (and `fuzz/Cargo.lock`'s) to local paths
+   without `source` and `checksum`. The tracked lockfiles resolve against crates.io, so do not
+   commit those hunks (`git checkout Cargo.lock fuzz/Cargo.lock`).
 2. Install Rust via [rustup](https://rustup.rs/). Development uses current stable; the MSRV
    in `Cargo.toml` (`rust-version`) applies to the library, not to tests and benches.
 3. Install [Task](https://taskfile.dev/installation/). All commands below go through it. Run

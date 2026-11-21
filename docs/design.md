@@ -51,8 +51,8 @@ Semantics: `Option<C>`, `None` only when no goal is reachable, `u32` as default 
   `value(&State) -> Option<u64>`.
 - A future float estimate over integer costs rounds up (`ceil`), as agreed with heuristic-search.
 
-Done: the trait, `heuristic_fn` and `HeuristicFn` are `search-core`'s (0.3, a path dependency
-with a version), re-exported from the crate root; the local definitions are gone. The
+Done: the trait, `heuristic_fn` and `HeuristicFn` are `search-core`'s (0.3, from crates.io),
+re-exported from the crate root; the local definitions are gone. The
 signatures are identical, so the heuristics only changed their `impl` path. The dependency is
 unconditional rather than behind a default feature: the crate has no use without the trait.
 `search_core::Zero` is not re-exported (no heuristic here needs it).
@@ -395,8 +395,7 @@ distances: not admissible, growing with the path, never a dead end.
 - Feature `merge-and-shrink`: `GoalDistance for MergeAndShrinkHeuristic`. Build with
   `prune: false` for arbitrary states.
 - Feature `cost-partition`: the same for `CostPartitionedHeuristic` and `MaxOverOrders`.
-- Both are path dependencies with a version (merge-and-shrink 0.3, cost-partition 0.2); both
-  versions are on crates.io.
+- Both are crates.io dependencies (merge-and-shrink 0.3, cost-partition 0.2).
 
 All adapters are dashed edges in `plan/architecture.md`: never required dependencies.
 
@@ -499,12 +498,11 @@ The dev-dependency is
 
 ```toml
 [dev-dependencies]
-width-search = { path = "../width-search", version = "0.3", features = ["sas-plus"] }
+width-search = { version = "0.3", features = ["sas-plus"] }
 ```
 
-`SasProblem::h_add` is public since width-search 0.3. `cargo publish` keeps only the
-`version` of a dev-dependency and drops the `path`, so the published manifest resolves against
-crates.io.
+`SasProblem::h_add` is public since width-search 0.3, so CI resolves it from crates.io. Local
+builds use the sibling checkout through the planning hub's `[patch.crates-io]`.
 
 ## Benchmark
 
