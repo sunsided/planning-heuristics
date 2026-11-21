@@ -1,6 +1,6 @@
 [package]
 name = "planning-heuristics"
-description = "Heuristics for classical planning: red-black, FF, landmark and abstraction heuristic adapters"
+description = "Heuristics for classical planning: delete relaxation (h_max, h_add, h_FF), red-black, landmarks, LM-cut, operator counting and abstraction adapters"
 version = "0.0.0"
 edition = "2024"
 rust-version = "1.86"
@@ -8,8 +8,8 @@ authors = ["Markus Mayer <widemeadows@gmail.com>"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/sunsided/planning-heuristics"
 readme = "README.md"
-keywords = ["planning", "heuristic", "sas", "red-black", "landmarks"]
-categories = ["algorithms", "science", "no-std"]
+keywords = ["planning", "heuristic", "landmarks", "lm-cut", "red-black"]
+categories = ["algorithms", "artificial-intelligence", "science", "no-std"]
 # Repository tooling stays out of the published crate.
 exclude = [
     ".github/",

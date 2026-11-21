@@ -8,21 +8,55 @@
 [![License](https://img.shields.io/crates/l/planning-heuristics)](https://github.com/sunsided/planning-heuristics#license)
 [![unsafe forbidden](https://img.shields.io/badge/unsafe-forbidden-success.svg)](https://github.com/rust-secure-code/safety-dance/)
 
-Heuristics for classical planning: red-black, FF, landmark and abstraction heuristic adapters.
+Goal-distance heuristics for classical planning tasks in [sas-plus](https://github.com/sunsided/sas-plus)'s
+finite-domain representation: the delete-relaxation family (`h_max`, `h_add`, `h_FF`, `h_sa`, `h²`), red-black
+planning, landmarks with count, uniform and optimal cost partitioning, LM-cut, operator counting and adapters for
+abstraction heuristics. The crate is `no_std` with `alloc` (only the LP-based heuristics behind the `lp` feature need
+`std`), and every state heuristic implements [search-core](https://github.com/sunsided/search-core)'s `Heuristic`
+trait, so it plugs into any search crate built on it.
+
+The red-black implementation follows Katz, Hoffmann & Domshlak (2013) and Domshlak, Hoffmann & Katz (2015) closely
+and was checked against both papers rule by rule, including every painting strategy they describe. The admissible
+heuristics (`h_max`, LM-cut, landmark cost partitioning, `h²`, operator counting, abstractions) are tested against
+exact goal distances computed by brute force. One shared `Relaxation` is `Sync`, so a parallel search can build it
+once and hand each thread its own heuristic.
 
 <!-- START doctoc generated TOC please keep comment here to allow auto update -->
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
 
+- [Who this is for](#who-this-is-for)
+- [Installation](#installation)
 - [Usage](#usage)
 - [Scope](#scope)
 - [Features](#features)
 - [MSRV](#msrv)
-- [Breaking changes](#breaking-changes)
-- [Status](#status)
 - [License](#license)
 - [Contributing](#contributing)
 
 <!-- END doctoc -->
+
+## Who this is for
+
+- Planning researchers who want to compare heuristics on the same task representation without porting
+  Fast Downward's C++, or who need a reference implementation of red-black planning or RHW landmarks to check
+  their own against.
+- Anyone building a classical planner in Rust: pick `h_FF` or red-black for satisficing greedy search, LM-cut or
+  landmark cost partitioning for optimal A*, and LAMA-style landmark tracking for path-dependent search.
+- Embedded and robotics teams that plan onboard: the crate runs on `no_std` targets with an allocator.
+- If the problem is a plain graph rather than a factored planning task, an explicit-state search with a
+  domain-specific heuristic in [heuristic-search](https://github.com/sunsided/heuristic-search) is the better
+  fit.
+- For merge-and-shrink abstractions or saturated cost partitioning themselves, use
+  [merge-and-shrink](https://github.com/sunsided/merge-and-shrink) and
+  [cost-partition](https://github.com/sunsided/cost-partition); this crate only adapts them to the
+  `Heuristic` trait.
+
+## Installation
+
+```toml
+[dependencies]
+planning-heuristics = "0.1"
+```
 
 ## Usage
 
@@ -83,8 +117,8 @@ assert_eq!(h_ff.value(&state), Some(3_u64));
   `sas_plus::Projection`, and (optional features) merge-and-shrink and saturated cost
   partitioning
 
-Not yet: preferred operators; `h²` with axioms; succinct macro plans for red-black DAGs and
-the other gaps listed in [docs/design.md](https://github.com/sunsided/planning-heuristics/blob/main/docs/design.md).
+Not yet implemented: preferred operators; `h²` with axioms; succinct macro plans for red-black
+DAGs and the other gaps listed in [docs/design.md](https://github.com/sunsided/planning-heuristics/blob/main/docs/design.md).
 
 The `Heuristic` trait, `heuristic_fn` and `HeuristicFn` are
 [search-core](https://github.com/sunsided/search-core)'s, re-exported from the crate root, so
@@ -104,24 +138,6 @@ these heuristics plug into every search crate built on it.
 
 Rust 1.86 for the library, with every feature. Tests and benches may need a newer Rust.
 
-## Breaking changes
-
-- `PaintingError` has a new variant `TooLarge`; `RedBlack` gained `with_options`.
-- `Painting::causal_graph_level` and `Painting::conflict_directed` take a `Fragment` and follow
-  the papers' painting algorithm: candidates must be RSE-invertible (also for `greedy` and
-  `greedy_dag`), causal graph leaves stay red, `CausalLevel` names the end kept black, and
-  conflicts no longer count goals. Black sets differ from before.
-- `Heuristic`, `heuristic_fn` and `HeuristicFn` are now `search_core`'s (identical signatures;
-  existing `use planning_heuristics::Heuristic` paths keep working).
-- The feature-gated heuristics of merge-and-shrink and cost-partition no longer implement
-  `Heuristic` directly (the orphan rule forbids it for a foreign trait). Wrap them:
-  `Adapter(builder.build(&task)).estimate(&state)`. Values are unchanged.
-
-## Status
-
-Pre-release, version 0.0.0, `no_std` with `alloc`. The API will change; see
-[docs/design.md](https://github.com/sunsided/planning-heuristics/blob/main/docs/design.md).
-
 ## License
 
 Licensed under either of
@@ -137,5 +153,4 @@ without any additional terms or conditions.
 
 ## Contributing
 
-See [CONTRIBUTING.md](https://github.com/sunsided/planning-heuristics/blob/main/CONTRIBUTING.md),
-including how to build against local checkouts of the sibling crates.
+See [CONTRIBUTING.md](https://github.com/sunsided/planning-heuristics/blob/main/CONTRIBUTING.md).

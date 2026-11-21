@@ -33,12 +33,14 @@
 //!   pattern database over a [`sas_plus::Projection`]. Features `merge-and-shrink` and
 //!   `cost-partition` implement [`GoalDistance`] for those crates' heuristics, which
 //!   [`Adapter`] turns into a [`Heuristic`].
+//! - [`RelevanceScore`]: the relevance score `h_Ξ` (Kim & Sridharan 2024), landmark-like and
+//!   inadmissible, over a partially explored backtracking tree.
+//! - [`GoalIntention`]: goal-intention ranking keys `ol_rp` / `op_rp` (Rosa et al. 2026) from
+//!   sampled relaxed plans, tracked along a path with [`IntentionTracker`].
 //!
-//! ## Planned
+//! ## Not yet implemented
 //!
 //! - Preferred operators
-//!
-//! See `docs/design.md` in the repository for the design and the milestones.
 //!
 //! ## Example
 //!

@@ -11,13 +11,7 @@ needs before it can be merged.
    [cost-partition](https://github.com/sunsided/cost-partition) and
    [width-search](https://github.com/sunsided/width-search) are ordinary crates.io
    dependencies, so a plain clone builds, and CI and Dependabot resolve them from crates.io.
-   To develop against their working trees instead, keep this repository inside the planning
-   hub directory next to them: the hub's untracked `.cargo/config.toml` patches them
-   (`[patch.crates-io]`) to the local checkouts. A patch whose local version does not match
-   the requirement is unused (cargo warns), and crates.io is used for that crate.
-
-   The patch rewrites `Cargo.lock` on every build, so this library tracks no lock file
-   (root or `fuzz/`); CI resolves fresh from crates.io.
+   This library tracks no lock file (root or `fuzz/`); CI resolves fresh from crates.io.
 2. Install Rust via [rustup](https://rustup.rs/). Development uses current stable; the MSRV
    in `Cargo.toml` (`rust-version`) applies to the library, not to tests and benches.
 3. Install [Task](https://taskfile.dev/installation/). All commands below go through it. Run

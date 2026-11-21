@@ -31,7 +31,7 @@ applyTo: "**/*.rs"
   the seeded random tasks: dead ends against relaxed reachability or `h*`, its ordering
   against the existing heuristics (`h_max <= h_FF <= h_add`, `h_max <= h_LM-cut <= h*`), and
   an independent oracle where one exists. The fuzz targets check the orderings too.
-- Public API changes go with a matching update to the README status list, the crate docs in
+- Public API changes go with a matching update to the README scope list, the crate docs in
   `lib.rs` and `docs/design.md`.
 - Mermaid diagrams in doc comments must match the code they describe. Update them when the
   structure changes.

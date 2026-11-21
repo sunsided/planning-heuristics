@@ -1,21 +1,19 @@
 # planning-heuristics: design
 
-Status: draft, milestones 1 to 7 implemented (branch `draft/initial`). Version stays 0.0.0.
-
 <!-- START doctoc generated TOC please keep comment here to allow auto update -->
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
 
 - [Scope](#scope)
 - [Heuristic trait](#heuristic-trait)
-- [Delete relaxation (milestone 1)](#delete-relaxation-milestone-1)
+- [Delete relaxation](#delete-relaxation)
   - [Relaxation](#relaxation)
   - [Worklist (Knuth / generalized Dijkstra)](#worklist-knuth--generalized-dijkstra)
   - [h_FF and relaxed plan extraction](#h_ff-and-relaxed-plan-extraction)
   - [Axioms](#axioms)
   - [Conditional effects](#conditional-effects)
-- [Red-black (milestone 3, done)](#red-black-milestone-3-done)
+- [Red-black](#red-black)
   - [Paper comparison](#paper-comparison)
-- [Landmarks (milestones 4 and 5, done)](#landmarks-milestones-4-and-5-done)
+- [Landmarks](#landmarks)
 - [Relevance score (done)](#relevance-score-done)
 - [Goal intention (done)](#goal-intention-done)
 - [Adapters (done)](#adapters-done)
@@ -24,7 +22,6 @@ Status: draft, milestones 1 to 7 implemented (branch `draft/initial`). Version s
 - [Cross-crate needs](#cross-crate-needs)
 - [Testing strategy](#testing-strategy)
 - [Benchmark](#benchmark)
-- [Milestones](#milestones)
 - [References](#references)
 
 <!-- END doctoc -->
@@ -33,7 +30,7 @@ Status: draft, milestones 1 to 7 implemented (branch `draft/initial`). Version s
 
 Goal-distance heuristics for classical planning over `sas_plus::Task` (0.2.1):
 
-- delete relaxation: `h_max`, `h_add`, `h_FF` with relaxed plan extraction (milestone 1),
+- delete relaxation: `h_max`, `h_add`, `h_FF` with relaxed plan extraction,
   set-additive `h_sa`, additive `h_max`; `h²`; operator counting (state equation, LP);
 - red-black partial delete relaxation (`h_RB`);
 - landmarks: LM-cut, `h^1` and RHW landmarks with disjunctions and reasonable orderings,
@@ -45,7 +42,7 @@ Out of scope: search algorithms (`heuristic-search`, `width-search`), grounding 
 the task model itself (`sas-plus`).
 
 This crate becomes the owner of the h_add / relaxed-plan code that `width-search` keeps as a
-private copy in `src/sas.rs` today (see `plan/status.md`).
+private copy in `src/sas.rs` today.
 
 ## Heuristic trait
 
@@ -61,9 +58,8 @@ impl<S, C, H: Heuristic<S, C> + ?Sized> Heuristic<S, C> for Box<H> { /* forwards
 pub fn heuristic_fn<S, C, F: FnMut(&S) -> Option<C>>(f: F) -> HeuristicFn<F>;
 ```
 
-`search_core::Heuristic` (search-core d7eb2c0), re-exported; it matched heuristic-search
-`draft/initial` (60d01f4) when it was local here. `&mut self` lets a heuristic reuse working memory without interior
-mutability; searches take the heuristic by value, and `&mut h` keeps it with its workspace.
+`search_core::Heuristic`, re-exported from the crate root. `&mut self` lets a heuristic reuse
+working memory without interior mutability; searches take the heuristic by value, and `&mut h` keeps it with its workspace.
 A blanket impl for closures would overlap with the `&mut H` impl (`&mut F` is itself
 `FnMut`, E0119), so closures go through `heuristic_fn`.
 
@@ -84,7 +80,7 @@ signatures are identical, so the heuristics only changed their `impl` path. The 
 unconditional rather than behind a default feature: the crate has no use without the trait.
 `search_core::Zero` is not re-exported (no heuristic here needs it).
 
-## Delete relaxation (milestone 1)
+## Delete relaxation
 
 ### Relaxation
 
@@ -202,7 +198,7 @@ contradicting its own precondition can never fire). Keeping them is sound, only 
 Supported, not rejected: each effect is its own rule with precondition ∪ conditions, and the
 replay handles repeated operators as above.
 
-## Red-black (milestone 3, done)
+## Red-black
 
 `RedBlack` (`h_RB`): black variables keep their deletes, the others are relaxed. Sources:
 Katz, Hoffmann & Domshlak, *Who Said We Need to Relax All Variables?*, ICAPS 2013
@@ -317,7 +313,7 @@ a plan, a proved dead end has `h* = ∞`, plans are valid red-black plans of cos
 `h_max`, and with every variable black they are real plans. A StarShapeLogistics test shows
 red facts following find the optimal plan where repair over-estimates.
 
-## Landmarks (milestones 4 and 5, done)
+## Landmarks
 
 - Done: `Relaxation::landmarks` computes `h^1` fact landmarks (Zhu & Givan 2003; Keyder,
   Richter & Helmert 2010) per state with a label fixpoint over the rules: state facts are
@@ -413,8 +409,8 @@ distances: not admissible, growing with the path, never a dead end.
   partition's share or `Task::costs`), looked up per state; `projection(task, pattern)` builds a
   pattern database. `None` for abstract dead ends and pruned states.
 - `GoalDistance` (`value(&self, &State) -> Option<u64>`) and `Adapter<H: GoalDistance>`, which
-  implements `Heuristic<State>` by forwarding and saturating at `u32::MAX`. Since milestone 7
-  the trait is foreign, so `impl Heuristic<State> for MergeAndShrinkHeuristic` would be an
+  implements `Heuristic<State>` by forwarding and saturating at `u32::MAX`. The trait is
+  foreign (search-core's), so `impl Heuristic<State> for MergeAndShrinkHeuristic` would be an
   orphan (E0117); the local `GoalDistance` impls are legal. A `heuristic_fn` closure would also
   work but has an unnameable type. The clean fix is for merge-and-shrink and cost-partition to
   implement `search_core::Heuristic` themselves; `Adapter` stays useful for any other
@@ -460,7 +456,7 @@ regression). It can switch only after it grounds to `sas_plus::Task` (roadmap op
   `Option<u64>` to `HValue` (`None` → infinity);
 - preferred operators: the `RelaxedPlan::ops` applicable in the state;
 - backward relaxed costs for regression stay in miniplan until a second user exists;
-- miniplan's `f64` costs must first become fixed-point integers (see `plan/status.md`).
+- miniplan's `f64` costs must first become fixed-point integers.
 
 ## Cross-crate needs
 
@@ -528,8 +524,7 @@ The dev-dependency is
 width-search = { version = "0.3", features = ["sas-plus"] }
 ```
 
-`SasProblem::h_add` is public since width-search 0.3, so CI resolves it from crates.io. Local
-builds use the sibling checkout through the planning hub's `[patch.crates-io]`.
+`SasProblem::h_add` is public since width-search 0.3, so it resolves from crates.io.
 
 ## Benchmark
 
@@ -537,7 +532,7 @@ builds use the sibling checkout through the planning hub's `[patch.crates-io]`.
 states, criterion means, one noisy shared machine: width-search's unchanged code moved by up
 to ±40% between runs, so read only large differences).
 
-Milestone 2a (workspace reuse, early stop), criterion means, before / after:
+First round (workspace reuse, early stop), criterion means, before / after:
 
 | Task | h_max | h_add | h_FF | width-search h_add (unchanged code) |
 |---|---|---|---|---|
@@ -548,7 +543,7 @@ Milestone 2a (workspace reuse, early stop), criterion means, before / after:
 | logistics-e | 2.22 / 2.08 ms | 1.79 / 2.22 ms | 2.69 / 2.17 ms | 3.16 / 0.89 ms |
 | random 40×400 | 1.66 / 0.35 ms | 1.21 / 0.30 ms | 1.91 / 0.31 ms | 0.73 / 0.52 ms |
 
-Milestone 2b (bucket queue, packed slots, direct start facts, epoch stamps). Profile first
+Second round (bucket queue, packed slots, direct start facts, epoch stamps). Profile first
 (callgrind on logistics-e `h_add`; perf is not permitted on this machine): the binary heap was
 about 30% of instructions, the rest bounds-checked indexing and per-fact/per-rule bookkeeping
 plus about 4% clearing buffers, so the heap hypothesis held only in part. Wiring showed the
@@ -569,9 +564,9 @@ task in both runs; on logistics-e by about 1.4–1.6×, on bw-large-a about 1.5�
 5×. Instruction counts (callgrind, per evaluation) agree: logistics-e 92k ours vs 144k theirs.
 `h_FF` does more work (plan marking and replay) and is above width-search's `h_add` on wiring
 (4.0–4.3 vs 2.6–3.0 µs). The guess at the time, that the axiom closure in the replay rescanning
-all axioms was the cause, turned out wrong; see milestone 2c.
+all axioms was the cause, turned out wrong; see the third round.
 
-Milestone 2c (indexed axiom closure, start facts skipped in the replay). Callgrind first, h_FF on
+Third round (indexed axiom closure, start facts skipped in the replay). Callgrind first, h_FF on
 wiring: of about 2,440 instructions per evaluation, the exploration takes about 1,570 (as much as
 `h_add`) and the axiom closure only about 190. Wiring has 6 axioms, 32 reachable states, and on
 average 0.34 replayed operators per evaluation, so the "rescan per step" cost barely occurs.
@@ -598,36 +593,6 @@ Wall-clock runs on the shared machine were too noisy to separate these (width-se
 width-search's 1,400 on this task) plus about 680 for marking supporters, scanning the closing
 order and building the relaxed state, not the axioms. No bench task has more than 6 axioms, so
 the scaling of the indexed closure is not measured here.
-
-## Milestones
-
-1. **Done**: `Relaxation`, worklist `h_max` / `h_add`, `h_FF` with relaxed plan extraction,
-   axioms and conditional effects, `Heuristic` trait, oracle tests.
-2. Speed, **done**: workspace reuse, early stop at the goal, flat watcher lists, bucket
-   queue, packed slots, `O(1)` reset with epoch stamps, criterion bench
-   (`benches/relaxation.rs`) against width-search's sweep. Indexed axiom closure in
-   the plan replay done. Open: preferred operators, incremental evaluation hooks. Then propose the
-   width-search switch.
-3. Red-black `h_RB` (greedy and all paper paintings for arcless and DAG fragments, plan
-   repair with forwarding, red facts following, stop search test, fixed-number fragment),
-   **done**.
-4. LM-cut, **done** (`src/lm_cut.rs`): `h_max` from scratch per round, operator-level
-   costs over effect rules; `LmCut::new` splits conditional operators by context (at most 64
-   copies each, `src/lm_cut/contexts.rs`), so the cut sum dominates `h_max`; the
-   `max(sum, h_max)` fallback remains for larger operators and shared relaxations.
-   Seeded evaluation (`LmCut::value_seeded`, `LmCut::h_max_seeded`): start costs per fact
-   instead of a state, and optional per-call operator costs, on the prebuilt relaxation.
-   Each seeded fact is an artificial operator from a start fact with the seed as its cost,
-   chargeable by cuts, so seeds add up per fact used; the bound is the cheapest seeded
-   completion `min_s Σ_v seed(s[v]) + h*(s)`. State seeds (`LmCut::seed_state`) reproduce
-   `LmCut::value` exactly (the state facts' zero-cost seed operators never enter a cut).
-   Tests: equality on every reachable state of random tasks, `<=` a brute-force completion
-   with random seeds and costs. Bench: 6-9x faster than rebuilding task and `LmCut` per call.
-5. Landmarks: `h^1` and RHW landmarks, disjunctive landmarks, reasonable orderings, landmark
-   count, uniform and optimal (LP, feature `lp`) cost partitioning, path-dependent tracking
-   (`PathHeuristic`, `LandmarkTracker`), **done**.
-6. Adapters: abstraction heuristics, `merge-and-shrink`, `cost-partition` features, **done**.
-7. Switch to the shared trait from `search-core`, **done** (feature adapters via `Adapter`).
 
 ## References
 
