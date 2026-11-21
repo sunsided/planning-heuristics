@@ -15,7 +15,7 @@ applyTo: "**/Cargo.toml,release-plz.toml,.github/workflows/release-plz.yml,**/CH
 - New dependencies must pass `cargo deny check`: allowed licenses, no advisories, no git or
   unknown-registry sources. Runtime dependencies are `search-core`, `sas-plus` and the
   optional `merge-and-shrink`, `cost-partition` and `microlp`; adding one needs a reason in
-  the PR. Path dependencies carry a `version` too.
+  the PR. Sibling crates are crates.io dependencies without `path`.
 - The dependent crate `decoupled-search` builds against this one by path:
   flag public API changes and require a `BREAKING CHANGE:` line for them.
 - `rust-version` is a signal, not a contract. Raising it is allowed when a dependency or a

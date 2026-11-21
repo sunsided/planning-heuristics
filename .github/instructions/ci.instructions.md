@@ -11,8 +11,6 @@ applyTo: ".github/workflows/**,Taskfile.dist.yaml,**/Taskfile.dist.yaml,.pre-com
   commands.
 - Every `uses:` is pinned to a full 40-character commit SHA, with a `# vX.Y.Z` comment. Reject
   tag or branch refs.
-- Local actions keep the `./` form with `# zizmor: ignore[self-repository]`: actionlint 1.7.12
-  rejects the `$/` form.
 - `dtolnay/rust-toolchain` is pinned to a `master` commit (`# master`) and always gets an
   explicit `toolchain:` input. Its `stable`/`nightly` branches are not tags, and Dependabot
   cannot follow them: it re-pinned the `nightly` use to the `stable` commit.
@@ -31,16 +29,13 @@ applyTo: ".github/workflows/**,Taskfile.dist.yaml,**/Taskfile.dist.yaml,.pre-com
   1.86 (README, MSRV). Do not add `--all-targets` or those features back.
 - `fuzz/` is a separate nightly workspace. Its tasks live in `fuzz/Taskfile.dist.yaml`,
   included as `fuzz:`; CI's `fuzz` job mirrors `task fuzz:build` and `task fuzz:lint`.
-- `Cargo.lock` and `fuzz/Cargo.lock` are tracked, but no step uses `--locked`: CI builds
-  against the default branches of the siblings, so a locked sibling version would fail every
-  job after its next release.
-- `search-core`, `merge-and-shrink`, `cost-partition` and `width-search` are path
-  dependencies. Jobs that resolve dependencies check this repository out into
-  `planning-heuristics/`, call `.github/actions/checkout-siblings`, and run from
-  `planning-heuristics/` (`defaults.run.working-directory`, plus the path inputs of
-  `uses:` steps: rust-cache `workspaces`, `manifest-path`, codecov `working-directory`).
-  A new sibling dependency goes into that action.
-- `cargo fmt` never gets `--all`: it would also format the path dependencies.
+- `Cargo.lock` and `fuzz/Cargo.lock` are tracked and resolve against crates.io. Reject lock
+  hunks that drop `source`/`checksum` from a sibling crate: they come from the planning hub's
+  local `[patch.crates-io]` and do not belong in the repository.
+- The sibling crates are crates.io dependencies, so CI needs no sibling checkout and runs
+  from the repository root, like any single-crate repository.
+- `cargo fmt` never gets `--all`: locally it would also format the sibling crates patched in
+  as local paths.
 - `scripts/check-branch.sh` is the single definition of allowed branch names. It is used by
   the Taskfile, the hook and the CI `branch` job.
 - New jobs that should gate merges must also be added to branch protection. Mention that in

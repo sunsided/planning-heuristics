@@ -5,9 +5,10 @@ classical planning tasks given as `sas_plus::Task` (delete relaxation, red-black
 LM-cut, abstractions), with strict conventions. Path-specific rules live in
 `.github/instructions/*.instructions.md`.
 
-- Local development and CI expect the sibling repositories `search-core`, `merge-and-shrink`,
-  `cost-partition` and `width-search` checked out next to this one (`../<sibling>`); they are
-  path dependencies (the last one a dev-dependency).
+- The sibling crates (`search-core`, `sas-plus`, `merge-and-shrink`, `cost-partition`,
+  `width-search`) are plain crates.io dependencies. Local development patches them to the
+  sibling working trees through the planning hub's untracked `.cargo/config.toml`; never add
+  a `path` to them in `Cargo.toml`.
 - Run checks through the Taskfile: `task ci` mirrors CI. `task lint`, `task test` and
   `task doc` are the common entry points.
 - Every item gets a doc comment, private items included. No `mod.rs` files (use `foo.rs`
