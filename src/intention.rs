@@ -284,17 +284,17 @@ struct Cost {
 impl Cost {
     /// Adds fact `f` (by fact id).
     fn add(&mut self, intention: &GoalIntention, f: usize) {
-        let (pg, pn) = (intention.goal[f], intention.not_goal[f]);
-        if pg == 0.0 {
+        let (p_goal, p_not_goal) = (intention.goal[f], intention.not_goal[f]);
+        if p_goal == 0.0 {
             self.impossible += 1;
             return;
         }
 
-        self.likelihood -= ln(pg);
-        if pn == 0.0 {
+        self.likelihood -= ln(p_goal);
+        if p_not_goal == 0.0 {
             self.certain += 1;
         } else {
-            self.not_goal += ln(pn);
+            self.not_goal += ln(p_not_goal);
         }
     }
 
