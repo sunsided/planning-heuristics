@@ -1,7 +1,7 @@
 //! The property check shared by all test tasks.
 
 use planning_heuristics::{Combine, HAdd, HFf, HMax, Heuristic};
-use sas_plus::Task;
+use sas_plus::{State, Task};
 
 use crate::oracle;
 
@@ -63,25 +63,28 @@ pub fn check_task(name: &str, task: &Task) -> usize {
             "h_max {max}, h_FF {ff}, h_add {add}, {}",
             ctx()
         );
-        let plan = h_ff.relaxed_plan(state).expect("not a dead end");
-        assert_eq!(
-            Some(&plan),
-            h_ff.relaxation().relaxed_plan(state).as_ref(),
-            "reused and fresh workspaces disagree, {}",
-            ctx()
-        );
-        assert!(
-            oracle::is_relaxed_plan(task, state, plan.ops()),
-            "invalid relaxed plan, {}",
-            ctx()
-        );
-        assert_eq!(
-            oracle::plan_cost(task, plan.ops()),
-            ff,
-            "plan cost, {}",
-            ctx()
-        );
+        check_relaxed_plan(task, &mut h_ff, state, ff, &ctx());
     }
 
     perfect.len()
+}
+
+/// Checks the relaxed plan `h_ff` extracts in `state`: the reused workspace gives the same
+/// plan as a fresh one, the plan is valid under the oracle, and it costs `ff`.
+///
+/// # Panics
+///
+/// Panics with `ctx` if a check fails or `state` is a dead end.
+fn check_relaxed_plan(task: &Task, h_ff: &mut HFf<'_>, state: &State, ff: u64, ctx: &str) {
+    let plan = h_ff.relaxed_plan(state).expect("not a dead end");
+    assert_eq!(
+        Some(&plan),
+        h_ff.relaxation().relaxed_plan(state).as_ref(),
+        "reused and fresh workspaces disagree, {ctx}"
+    );
+    assert!(
+        oracle::is_relaxed_plan(task, state, plan.ops()),
+        "invalid relaxed plan, {ctx}"
+    );
+    assert_eq!(oracle::plan_cost(task, plan.ops()), ff, "plan cost, {ctx}");
 }

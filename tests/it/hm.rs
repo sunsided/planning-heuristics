@@ -80,40 +80,13 @@ fn h2_oracle(task: &Task, state: &State) -> Option<u64> {
         .flat_map(|v| (0..task.variables[v].domain_size).map(move |x| Fact::new(v, x)))
         .collect();
     let holds = |f: &Fact| state.0[f.var] == f.value;
-    let mut sets: Vec<Vec<Fact>> = facts.iter().map(|&f| vec![f]).collect();
-    for (i, &p) in facts.iter().enumerate() {
-        sets.extend(
-            facts[i + 1..]
-                .iter()
-                .filter(|q| q.var != p.var)
-                .map(|&q| vec![p, q]),
-        );
-    }
+    let sets = singletons_and_pairs(&facts);
 
     let mut h: BTreeMap<Vec<Fact>, u64> = sets
         .iter()
         .filter(|s| s.iter().all(holds))
         .map(|s| (s.clone(), 0))
         .collect();
-    let of = |h: &BTreeMap<Vec<Fact>, u64>, set: &[Fact]| -> Option<u64> {
-        let mut set = set.to_vec();
-        set.sort_unstable();
-        set.dedup();
-        let mut worst = 0;
-        for (i, &p) in set.iter().enumerate() {
-            for &q in &set[i..] {
-                if p.var == q.var && p != q {
-                    return None;
-                }
-
-                let key = if p == q { vec![p] } else { vec![p, q] };
-                worst = worst.max(*h.get(&key)?);
-            }
-        }
-
-        Some(worst)
-    };
-
     let mut changed = true;
     while changed {
         changed = false;
@@ -131,7 +104,7 @@ fn h2_oracle(task: &Task, state: &State) -> Option<u64> {
                 let mut regression: Vec<Fact> =
                     s.iter().copied().filter(|f| !eff.contains(f)).collect();
                 regression.extend(&task.operators[op].pre);
-                let Some(base) = of(&h, &regression) else {
+                let Some(base) = set_cost(&h, &regression) else {
                     continue;
                 };
 
@@ -144,7 +117,43 @@ fn h2_oracle(task: &Task, state: &State) -> Option<u64> {
         }
     }
 
-    of(&h, &task.goal)
+    set_cost(&h, &task.goal)
+}
+
+/// Every single fact of `facts`, and every pair of facts on different variables.
+fn singletons_and_pairs(facts: &[Fact]) -> Vec<Vec<Fact>> {
+    let mut sets: Vec<Vec<Fact>> = facts.iter().map(|&f| vec![f]).collect();
+    for (i, &p) in facts.iter().enumerate() {
+        sets.extend(
+            facts[i + 1..]
+                .iter()
+                .filter(|q| q.var != p.var)
+                .map(|&q| vec![p, q]),
+        );
+    }
+
+    sets
+}
+
+/// The `h²` cost of `set` under the table `h`: the most expensive of its facts and pairs;
+/// `None` if two of its facts contradict each other or a fact or pair has no cost yet.
+fn set_cost(h: &BTreeMap<Vec<Fact>, u64>, set: &[Fact]) -> Option<u64> {
+    let mut set = set.to_vec();
+    set.sort_unstable();
+    set.dedup();
+    let mut worst = 0;
+    for (i, &p) in set.iter().enumerate() {
+        for &q in &set[i..] {
+            if p.var == q.var && p != q {
+                return None;
+            }
+
+            let key = if p == q { vec![p] } else { vec![p, q] };
+            worst = worst.max(*h.get(&key)?);
+        }
+    }
+
+    Some(worst)
 }
 
 /// `h²` equals the oracle on tasks it shares with it, and on every task `h_max <= h² <= h*`

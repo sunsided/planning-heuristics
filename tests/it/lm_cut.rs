@@ -74,18 +74,7 @@ fn check_variant(
         let ctx = || format!("{name}, state {:?}", state.0);
         let value = lm_cut.value(&state);
         let max = h_max.value(&state);
-        // Context splitting drops effects that contradict their precondition, so the split
-        // variant can prove more dead ends than `h_max`; each must be real.
-        if max.is_none() || lm_cut.is_exact() && value.is_none() {
-            assert!(max.is_none() <= value.is_none(), "dead ends, {}", ctx());
-            assert!(
-                value.is_some() || h_star.is_none(),
-                "false dead end, {}",
-                ctx()
-            );
-        } else {
-            assert_eq!(value.is_none(), max.is_none(), "dead ends, {}", ctx());
-        }
+        check_dead_ends(lm_cut.is_exact(), value, max, h_star, &ctx());
 
         let (Some(value), Some(max)) = (value, max) else {
             continue;
@@ -103,27 +92,63 @@ fn check_variant(
             assert!(sum >= max, "exact, but sum {sum} < h_max {max}, {}", ctx());
         }
 
-        for landmark in &landmarks {
-            assert!(
-                landmark.cost() > 0 && !landmark.ops().is_empty(),
-                "{}",
-                ctx()
-            );
-            if h_star.is_some() {
-                assert!(
-                    !goal_reachable_without(task, &state, landmark.ops()),
-                    "{:?} is no action landmark, {}",
-                    landmark.ops(),
-                    ctx()
-                );
-            }
-        }
+        check_landmarks(task, &state, &landmarks, h_star.is_some(), &ctx());
 
         above.0 += usize::from(value > max);
         above.1 += usize::from(value > uniform.value(&state).expect("not a dead end"));
     }
 
     above
+}
+
+/// Checks that LM-cut (`value`) and `h_max` (`max`) agree on dead ends where they must, and
+/// that every dead end LM-cut proves beyond `h_max` is real (`h_star` is `None`).
+///
+/// Context splitting drops effects that contradict their precondition, so the split
+/// variant (`exact` false) can prove more dead ends than `h_max`; each must be real.
+///
+/// # Panics
+///
+/// Panics with `ctx` on a disagreement or a false dead end.
+fn check_dead_ends(
+    exact: bool,
+    value: Option<u64>,
+    max: Option<u64>,
+    h_star: Option<u64>,
+    ctx: &str,
+) {
+    if max.is_none() || exact && value.is_none() {
+        assert!(max.is_none() <= value.is_none(), "dead ends, {ctx}");
+        assert!(value.is_some() || h_star.is_none(), "false dead end, {ctx}");
+    } else {
+        assert_eq!(value.is_none(), max.is_none(), "dead ends, {ctx}");
+    }
+}
+
+/// Checks that every landmark LM-cut found in `state` has a positive cost and operators, and,
+/// if the goal is reachable (`solvable`), that it is a real action landmark: the goal is
+/// unreachable without its operators.
+///
+/// # Panics
+///
+/// Panics with `ctx` if a landmark fails a check.
+fn check_landmarks(
+    task: &Task,
+    state: &State,
+    landmarks: &[ActionLandmark],
+    solvable: bool,
+    ctx: &str,
+) {
+    for landmark in landmarks {
+        assert!(landmark.cost() > 0 && !landmark.ops().is_empty(), "{ctx}");
+        if solvable {
+            assert!(
+                !goal_reachable_without(task, state, landmark.ops()),
+                "{:?} is no action landmark, {ctx}",
+                landmark.ops()
+            );
+        }
+    }
 }
 
 /// Checks [`SEEDS`] random tasks generated with `params`.
