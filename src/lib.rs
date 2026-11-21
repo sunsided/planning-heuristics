@@ -75,6 +75,7 @@
 //! Repository: <https://github.com/sunsided/planning-heuristics>
 
 #![no_std]
+#![forbid(unsafe_code)]
 
 extern crate alloc;
 
