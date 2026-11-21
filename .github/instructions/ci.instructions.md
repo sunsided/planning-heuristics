@@ -29,9 +29,10 @@ applyTo: ".github/workflows/**,Taskfile.dist.yaml,**/Taskfile.dist.yaml,.pre-com
   1.86 (README, MSRV). Do not add `--all-targets` or those features back.
 - `fuzz/` is a separate nightly workspace. Its tasks live in `fuzz/Taskfile.dist.yaml`,
   included as `fuzz:`; CI's `fuzz` job mirrors `task fuzz:build` and `task fuzz:lint`.
-- `Cargo.lock` and `fuzz/Cargo.lock` are tracked and resolve against crates.io. Reject lock
-  hunks that drop `source`/`checksum` from a sibling crate: they come from the planning hub's
-  local `[patch.crates-io]` and do not belong in the repository.
+- No `Cargo.lock` is tracked (root or `fuzz/`): this is a library, and local builds in the
+  planning hub patch published siblings to their working trees (the hub's
+  `.cargo/config.toml`), which rewrites the lock on every build. CI resolves fresh from
+  crates.io, and no step uses `--locked`.
 - The sibling crates are crates.io dependencies, so CI needs no sibling checkout and runs
   from the repository root, like any single-crate repository.
 - `cargo fmt` never gets `--all`: locally it would also format the sibling crates patched in

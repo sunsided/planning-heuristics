@@ -16,9 +16,8 @@ needs before it can be merged.
    (`[patch.crates-io]`) to the local checkouts. A patch whose local version does not match
    the requirement is unused (cargo warns), and crates.io is used for that crate.
 
-   The patch rewrites their `Cargo.lock` entries (and `fuzz/Cargo.lock`'s) to local paths
-   without `source` and `checksum`. The tracked lockfiles resolve against crates.io, so do not
-   commit those hunks (`git checkout Cargo.lock fuzz/Cargo.lock`).
+   The patch rewrites `Cargo.lock` on every build, so this library tracks no lock file
+   (root or `fuzz/`); CI resolves fresh from crates.io.
 2. Install Rust via [rustup](https://rustup.rs/). Development uses current stable; the MSRV
    in `Cargo.toml` (`rust-version`) applies to the library, not to tests and benches.
 3. Install [Task](https://taskfile.dev/installation/). All commands below go through it. Run
