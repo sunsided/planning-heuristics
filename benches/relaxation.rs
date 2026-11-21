@@ -9,8 +9,9 @@ use std::hint::black_box;
 
 use criterion::Criterion;
 use planning_heuristics::{
-    HAdd, HFf, HMax, HSetAdd, Heuristic, LandmarkCount, LandmarkTracker, LmCut, Painting,
-    PathHeuristic, RedBlack, RedBlackOptions, TrackingMode, UniformLandmarkCost,
+    GoalIntention, HAdd, HFf, HMax, HSetAdd, Heuristic, IntentionKind, IntentionParams,
+    LandmarkCount, LandmarkTracker, LmCut, Painting, PathHeuristic, RedBlack, RedBlackOptions,
+    RelevanceParams, RelevanceScore, TrackingMode, UniformLandmarkCost,
 };
 use sas_plus::fdr::SasFile;
 use sas_plus::random::{RandomTaskParams, random_task};
@@ -127,6 +128,17 @@ fn bench_task(criterion: &mut Criterion, name: &str, task: &Task) {
     }
 
     bench_seeded_lm_cut(&mut group, task, &states);
+    // A small explored tree (2 000 nodes), far below the paper's 100 000.
+    let relevance = RelevanceScore::with_params(
+        task,
+        &RelevanceParams {
+            min_nodes: 2_000,
+            max_nodes: 2_000,
+            ..RelevanceParams::default()
+        },
+    );
+    bench_heuristic(&mut group, "relevance_2k", relevance, &states);
+    bench_intention(&mut group, task, &states);
 
     let width = SasProblem::new(task);
     group.bench_function("width_search_h_add", |b| {
@@ -179,6 +191,35 @@ fn bench_seeded_lm_cut(
                 .map(|s| {
                     lm_cut.seed_state(black_box(s), &mut seeds);
                     lm_cut.value_seeded(&seeds, Some(&costs))
+                })
+                .collect::<Vec<_>>()
+        });
+    });
+}
+
+/// Benchmarks the goal-intention likelihood as a search uses it: `on_expand` from the start
+/// state to each sampled state along an applicable operator (or estimate the root), then
+/// `estimate`. The one-off sampling (100 relaxed plans) is not timed.
+fn bench_intention(
+    group: &mut criterion::BenchmarkGroup<'_, criterion::measurement::WallTime>,
+    task: &Task,
+    states: &[State],
+) {
+    let intention = GoalIntention::new(task, &IntentionParams::default());
+    let mut tracker = intention.tracker(IntentionKind::Likelihood, true);
+    let start = &states[0];
+    let root = tracker.root(start);
+    let steps: Vec<(usize, State)> = task
+        .applicable_operators(start)
+        .map(|op| (op, task.apply(op, start)))
+        .collect();
+    group.bench_function("intention_ol_r", |b| {
+        b.iter(|| {
+            steps
+                .iter()
+                .map(|(op, child)| {
+                    let info = tracker.on_expand(start, &root, *op, black_box(child));
+                    tracker.estimate(child, &info)
                 })
                 .collect::<Vec<_>>()
         });
