@@ -473,8 +473,16 @@ effects and axioms), seeded random tasks from `sas_plus::random` (64 seeds each 
 conditional effects, axioms, mixed), and hand-made corner cases (self-dependent conditional
 effect, shared subgoal, unreachable goal, free derived default, satisfied goal).
 
-Seeds are looped directly; no proptest, since the generator is already seeded and the state
-spaces are small. Keep any later proptest at `PROPTEST_CASES=64`.
+Seeds are looped directly; no proptest over tasks, since the generator is already seeded and
+the state spaces are small. Keep any later proptest over tasks at 64 cases (set in its
+`ProptestConfig`, so `task test:prop` does not raise it). The no_std `ln` in `src/math.rs` has
+a proptest against `std` over all positive finite `f64` bit patterns.
+
+Fuzzing (`fuzz/`, cargo-fuzz, nightly) checks the same orderings without an oracle on tasks
+the tests never build: `fdr_heuristics` parses mutated `output.sas` text (seeded with the
+fixtures), `random_heuristics` fuzzes the `sas_plus::random` parameters. Along a short walk
+from the initial state, `h_max`, `h_add` and `h_FF` agree on dead ends, `h_max <= h_FF <=
+h_add`, the relaxed plan costs `h_FF`, goal states are 0, and LM-cut is at least `h_max`.
 
 Comparison with width-search (`tests/it/width_search.rs`): `h_add` against
 `width_search::sas::SasProblem::h_add` on every reachable state of the fixtures and of random
