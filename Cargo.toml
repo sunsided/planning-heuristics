@@ -25,12 +25,12 @@ cost-partition = ["dep:cost-partition"]
 lp = ["dep:microlp"]
 
 [dependencies]
-# Unreleased: the shared Heuristic trait (see docs/design.md).
+# The shared Heuristic trait, re-exported from the crate root (see docs/design.md).
 search-core = { path = "../search-core", version = "0.3" }
 sas-plus = { version = "0.2.1", default-features = false }
-# Unreleased: MergeAndShrinkHeuristic::value needs 0.3.0 (see docs/design.md).
+# MergeAndShrinkHeuristic::value needs 0.3 (see docs/design.md).
 merge-and-shrink = { path = "../merge-and-shrink", version = "0.3.0", default-features = false, optional = true }
-# Unreleased: MaxOverOrders needs 0.2.0 (see docs/design.md).
+# MaxOverOrders needs 0.2 (see docs/design.md).
 cost-partition = { path = "../cost-partition", version = "0.2.0", default-features = false, optional = true }
 
 # Pure-Rust simplex; std only, so it stays behind the `lp` feature.

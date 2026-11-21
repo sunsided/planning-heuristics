@@ -51,8 +51,8 @@ Semantics: `Option<C>`, `None` only when no goal is reachable, `u32` as default 
   `value(&State) -> Option<u64>`.
 - A future float estimate over integer costs rounds up (`ceil`), as agreed with heuristic-search.
 
-Done: the trait, `heuristic_fn` and `HeuristicFn` are `search-core`'s (a path dependency on
-its unreleased 0.0.0), re-exported from the crate root; the local definitions are gone. The
+Done: the trait, `heuristic_fn` and `HeuristicFn` are `search-core`'s (0.3, a path dependency
+with a version), re-exported from the crate root; the local definitions are gone. The
 signatures are identical, so the heuristics only changed their `impl` path. The dependency is
 unconditional rather than behind a default feature: the crate has no use without the trait.
 `search_core::Zero` is not re-exported (no heuristic here needs it).
@@ -395,8 +395,8 @@ distances: not admissible, growing with the path, never a dead end.
 - Feature `merge-and-shrink`: `GoalDistance for MergeAndShrinkHeuristic`. Build with
   `prune: false` for arbitrary states.
 - Feature `cost-partition`: the same for `CostPartitionedHeuristic` and `MaxOverOrders`.
-- Both are path dependencies on unreleased versions (merge-and-shrink 0.3.0, cost-partition
-  0.2.0) and must be published before this crate.
+- Both are path dependencies with a version (merge-and-shrink 0.3, cost-partition 0.2); both
+  versions are on crates.io.
 
 All adapters are dashed edges in `plan/architecture.md`: never required dependencies.
 
@@ -443,14 +443,13 @@ regression). It can switch only after it grounds to `sas_plus::Task` (roadmap op
   defaults (see Testing); both go away when it switches to this crate.
 - **sas-plus**: none required. Nice to have: DTGs (red-black builds its own),
   indexed axiom evaluation (would replace the `close_axioms` rescans here).
-- **search-core**: publish 0.1; this crate re-exports its `Heuristic` and depends on it by
-  path until then. Its MIGRATION.md calls this crate's switch 1:1, which misses the orphan
+- **search-core**: none required (0.3 is released); this crate re-exports its `Heuristic`.
+  Its MIGRATION.md calls this crate's switch 1:1, which misses the orphan
   rule for the feature adapters (see Adapters).
 - **merge-and-shrink**, **cost-partition**: implement `search_core::Heuristic` directly, so
   the `Adapter` wrapping becomes optional.
-- **merge-and-shrink**: publish 0.3.0 (`MergeAndShrinkHeuristic::value`); the
-  `merge-and-shrink` feature uses it as a path dependency until then.
-- **cost-partition**: publish 0.2.0 (`MaxOverOrders`) for the `cost-partition` feature; an LP
+- **merge-and-shrink**: released; 0.3 ships `MergeAndShrinkHeuristic::value`.
+- **cost-partition**: released; 0.2 ships `MaxOverOrders`. An LP
   solver (its planned optimal baseline) would enable optimal landmark cost partitioning here.
 
 ## Testing strategy
