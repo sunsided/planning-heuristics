@@ -88,17 +88,21 @@ fn split_operator(
         }
     }
 
+    // In exact mode a variable has one choice per value; count before building them, so a
+    // huge domain is rejected without being materialized.
+    let choices =
+        |(var, choices): &(VarId, Vec<Choice>)| domains.map_or(choices.len(), |d| d[*var] as usize);
+    let count = vars
+        .iter()
+        .try_fold(1_usize, |n, v| n.checked_mul(choices(v)))?;
+    if count > max_contexts {
+        return None;
+    }
+
     if let Some(domains) = domains {
         for (var, choices) in &mut vars {
             *choices = (0..domains[*var]).map(Some).collect();
         }
-    }
-
-    let count = vars
-        .iter()
-        .try_fold(1_usize, |n, (_, choices)| n.checked_mul(choices.len()))?;
-    if count > max_contexts {
-        return None;
     }
 
     let copies = (0..count)
@@ -224,5 +228,24 @@ mod tests {
             effects_with(&[Fact::new(0, 2), Fact::new(1, 1)]),
             [Fact::new(3, 1), Fact::new(6, 1)]
         );
+    }
+
+    /// In exact mode a context variable takes every value of its domain, and a domain too
+    /// large for the limit is rejected before its values are built.
+    #[test]
+    fn exact_copies_take_every_value() {
+        let op = Operator {
+            name: "op".into(),
+            pre: alloc::vec![],
+            eff: alloc::vec![Effect {
+                conditions: alloc::vec![Fact::new(0, 1)],
+                fact: Fact::new(1, 1)
+            }],
+            cost: 1,
+        };
+        let copies = split_operator(&op, 64, Some(&[3, 2])).unwrap();
+        assert_eq!(copies.len(), 3);
+        assert!(copies.iter().all(|c| c.pre.len() == 1));
+        assert!(split_operator(&op, 64, Some(&[u32::MAX, 2])).is_none());
     }
 }

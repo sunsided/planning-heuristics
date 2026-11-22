@@ -106,7 +106,10 @@ impl fmt::Display for PaintingError {
             Self::Derived(v) => write!(f, "variable {v} is derived"),
             Self::InAxiom(v) => write!(f, "variable {v} appears in an axiom"),
             Self::ConditionalEffect(v) => {
-                write!(f, "variable {v} appears in a conditional effect")
+                write!(
+                    f,
+                    "variable {v} appears in a conditional effect with too many contexts to compile"
+                )
             }
             Self::Dependent(u, v) => {
                 write!(f, "variables {u} and {v} are linked in the causal graph")
