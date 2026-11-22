@@ -64,8 +64,6 @@ tasks:
   fmt:
     desc: Format all Rust sources
     cmds:
-      # No --all: it would also format the sibling crates that the planning hub's
-      # .cargo/config.toml patches in as local paths.
       - cargo fmt
       - task: fuzz:fmt
 

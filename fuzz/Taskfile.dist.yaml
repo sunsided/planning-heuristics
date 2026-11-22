@@ -1,7 +1,6 @@
 # Included from the root Taskfile as `fuzz:` with dir: fuzz.
 # fuzz/ is a separate cargo-fuzz workspace and needs the nightly toolchain.
-# cargo fmt runs without --all, which would also format the path dependency .. and the sibling
-# crates that the planning hub's .cargo/config.toml patches in.
+# cargo fmt runs without --all, which would also format the path dependency ..
 version: '3'
 
 vars:

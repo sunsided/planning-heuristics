@@ -87,11 +87,9 @@ works on them.
 Versions follow [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html), as Cargo
 implements it (in `0.x`, a minor bump is breaking).
 
-Releases are handled by [release-plz](https://release-plz.dev/). The release jobs stay
-dormant until the repository variable `RELEASE_APP_CLIENT_ID` (and the secret
-`RELEASE_APP_PRIVATE_KEY`) of the release GitHub App are set; setting them activates
-releases. Every merge to
-`main` updates a release PR. Merging that PR tags the release and creates the
+Releases are handled by [release-plz](https://release-plz.dev/), acting as the release
+GitHub App (repository variable `RELEASE_APP_CLIENT_ID`, secret `RELEASE_APP_PRIVATE_KEY`).
+Every merge to `main` updates a release PR. Merging that PR tags the release and creates the
 GitHub Releases. The `vX.Y.Z` tag then triggers `publish-crates-io.yml`, which
 publishes the crate to crates.io via trusted publishing from the protected `crates-io`
 environment.

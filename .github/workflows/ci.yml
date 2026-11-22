@@ -48,8 +48,7 @@ jobs:
         with:
           toolchain: stable
           components: rustfmt
-      # No --all: locally it would also format the sibling crates patched in by the planning
-      # hub's .cargo/config.toml (see CONTRIBUTING.md); keep CI identical to `task fmt:check`.
+      # Keep CI identical to `task fmt:check`.
       - run: cargo fmt --check
 
   clippy:
@@ -190,7 +189,7 @@ jobs:
       # do, so no --all-targets.
       - run: cargo hack check --rust-version --workspace --ignore-private --each-feature
 
-  # Baseline: the published 0.0.0 placeholder on crates.io.
+  # Baseline: the latest release on crates.io.
   semver:
     name: semver
     if: github.event_name == 'pull_request'
