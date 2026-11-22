@@ -7,6 +7,7 @@ rust-version = "1.86"
 authors = ["Markus Mayer <widemeadows@gmail.com>"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/sunsided/planning-heuristics"
+homepage = "https://sunsided.github.io/planning-and-search/crates/planning-heuristics/"
 readme = "README.md"
 keywords = ["planning", "heuristic", "landmarks", "lm-cut", "red-black"]
 categories = ["algorithms", "artificial-intelligence", "science", "no-std"]

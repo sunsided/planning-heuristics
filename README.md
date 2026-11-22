@@ -21,6 +21,8 @@ heuristics (`h_max`, LM-cut, landmark cost partitioning, `h²`, operator countin
 exact goal distances computed by brute force. One shared `Relaxation` is `Sync`, so a parallel search can build it
 once and hand each thread its own heuristic.
 
+Part of the [planning and search crates](https://sunsided.github.io/planning-and-search/); see also this crate's [overview page](https://sunsided.github.io/planning-and-search/crates/planning-heuristics/).
+
 <!-- START doctoc generated TOC please keep comment here to allow auto update -->
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
 
