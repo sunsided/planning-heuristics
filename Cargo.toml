@@ -1,7 +1,7 @@
 [package]
 name = "planning-heuristics"
 description = "Heuristics for classical planning: delete relaxation (h_max, h_add, h_FF), red-black, landmarks, LM-cut, operator counting and abstraction adapters"
-version = "0.0.0"
+version = "0.1.0"
 edition = "2024"
 rust-version = "1.86"
 authors = ["Markus Mayer <widemeadows@gmail.com>"]
@@ -36,8 +36,6 @@ cost-partition = ["dep:cost-partition"]
 ## Optimal landmark cost partitioning by linear programming (microlp; pulls in std).
 lp = ["dep:microlp"]
 
-# Sibling crates come from crates.io; local development patches them to the sibling working
-# trees through the planning hub's .cargo/config.toml (see CONTRIBUTING.md).
 [dependencies]
 # The shared Heuristic trait, re-exported from the crate root (see docs/design.md).
 search-core = "0.3"
