@@ -145,7 +145,8 @@ const STRATEGIES: [&str; 20] = [
 /// Whether `plan` is valid for `state` with `black` painted black: a red-black plan, checked
 /// by [`is_red_black_plan`]. If a black variable appears in a conditional effect, the
 /// heuristic runs on the task with conditional effects compiled into context copies, whose
-/// red-black semantics may skip effects the original operator would fire on red conditions.
+/// red-black semantics fix one red-true value per red context variable, where the original
+/// operator fires the effects of all of them.
 /// The simulator does not know the copies, so only the weaker property is checked there: the
 /// plan is a relaxed plan of `task` (every red-black plan of the compiled task is one).
 fn is_valid_plan(task: &Task, black: &[usize], state: &State, plan: &[OpId]) -> bool {
@@ -569,6 +570,35 @@ fn conditional_effect_variables_are_painted_black() {
         "no strategy paints a conditional effect variable black"
     );
     assert!(above > 0, "h_RB never exceeds h_FF with such a painting");
+}
+
+/// Conditional effects compile exactly for red-black planning: `A` sets `g` and, if `b = 1`,
+/// resets `y`. With every variable black the plan must really set `b` to 0 first (`h* = 2`);
+/// a copy without a precondition on `b` would let `A` skip the reset.
+#[test]
+fn compiled_copies_respect_black_conditions() {
+    let a = op(
+        vec![],
+        vec![
+            Effect::new(Fact::new(2, 1)),
+            Effect {
+                conditions: vec![Fact::new(0, 1)],
+                fact: Fact::new(1, 0),
+            },
+        ],
+    );
+    let set_b0 = op(vec![Fact::new(0, 1)], vec![Effect::new(Fact::new(0, 0))]);
+    let mut task = binary_task(3, vec![a, set_b0]);
+    task.initial = State(vec![1, 1, 0]);
+    task.goal = vec![Fact::new(2, 1), Fact::new(1, 1)];
+    let state = task.initial_state();
+
+    let painting = Painting::bounded(&task, vec![0, 1, 2]).expect("small");
+    let plan = RedBlack::with_painting(&task, &painting)
+        .plan(&state)
+        .expect("solvable");
+    assert_eq!(plan.ops(), [1, 0]);
+    assert!(plan.is_plan_for(&task, &state));
 }
 
 /// A conditional effect with more than 64 contexts stays conditional, and its variables stay

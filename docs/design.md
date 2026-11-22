@@ -218,15 +218,20 @@ C); Domshlak, Hoffmann & Katz, *Red-Black Planning: A New Systematic Approach to
 Delete Relaxation*, AIJ 221, 2015 (the journal version: Figures 4, 7 and 8, paintings L, A,
 C). All three were checked against the PDFs.
 
-- Conditional effects are compiled away first, as the AIJ paper's planners do (Section 7.3,
-  Table 9: a "multiply out" compilation): every operator is split into one copy per context
-  of its effect conditions (`lm_cut::contexts`, at most 64 contexts per operator), with
-  unconditional effects. Paintings are checked and chosen on the compiled task; `RedBlack`
+- Conditional effects are compiled away first, in the spirit of the "multiply out"
+  compilation the AIJ paper names for its planners (Section 7.3, Table 9 caption; no
+  details given): every operator is split into one copy per assignment of the variables its
+  effect conditions mention (`lm_cut::contexts::split_exact`, at most 64 copies per
+  operator), with unconditional effects. Unlike the split for LM-cut and `h²`, it is exact
+  (every value, no "any other" copy without a precondition): exactly one copy applies in
+  each state, so the compiled task has exactly the task's plans. With the inexact split an
+  all-black plan was not a real plan (regression test
+  `compiled_copies_respect_black_conditions`). Paintings are checked and chosen on the compiled task; `RedBlack`
   repairs on it (with its own relaxation) only when a black variable appears in a
   conditional effect, and maps plan operators back to the task's. So the estimates of
-  paintings without such variables are unchanged. The compiled task's red-black semantics
-  may skip an effect the original operator would fire on a red condition (the "any other"
-  copy); the tests check those plans as relaxed plans of the original task instead of with
+  paintings without such variables are unchanged. Under red-black semantics a copy
+  fixes one red-true value of each red context variable, while the original operator would
+  fire the effects of all red-true values; the tests check those plans as relaxed plans of the original task instead of with
   the red-black simulator. `h_RB >= h_FF` (the original's) holds on every test task, though
   only `h_RB >= h_FF` of the compiled task follows from the construction.
 - Painting: black variables must be state variables outside axioms and outside conditional

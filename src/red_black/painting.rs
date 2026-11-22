@@ -32,10 +32,12 @@ pub use strategy::Strategy;
 /// & Katz (AIJ 2015, Theorem 11). [`Painting::new`] and [`Painting::dag`] do not check it; every
 /// strategy constructor paints only RSE-invertible variables.
 ///
-/// Conditional effects are compiled away first, as in Domshlak, Hoffmann & Katz (AIJ 2015,
-/// Section 7.3: the "multiply out" compilation): each operator is split into one copy per
-/// context of its effect conditions (as for [`crate::LmCut::new`]), whose effects are
-/// unconditional. All checks run on the compiled task, so a variable that only appears in
+/// Conditional effects are compiled away first, in the spirit of the "multiply out"
+/// compilation Domshlak, Hoffmann & Katz name for their planners (AIJ 2015, Section 7.3,
+/// Table 9): each operator is split into one copy per assignment of the variables its effect
+/// conditions mention, whose effects are unconditional. The split is exact (every value of
+/// each such variable, no "any other" copy), so the compiled task has exactly the task's
+/// plans and a black variable cannot skip an effect it really triggers. All checks run on the compiled task, so a variable that only appears in
 /// conditional effects can be black; [`crate::RedBlack`] then repairs on the compiled task.
 /// Variables of an operator with more than 64 contexts stay ineligible.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Default)]
@@ -563,7 +565,7 @@ const MAX_CONTEXTS: usize = 64;
 /// `task` with its conditional effects compiled away by context splitting (operators with too
 /// many contexts keep theirs); `None` if `task` has no conditional effects.
 pub(super) fn split(task: &Task) -> Option<Split> {
-    contexts::split(task, MAX_CONTEXTS)
+    contexts::split_exact(task, MAX_CONTEXTS)
 }
 
 /// The task the painting checks run on: `task` with its conditional effects compiled away.

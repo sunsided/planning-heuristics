@@ -118,8 +118,8 @@ assert_eq!(h_ff.value(&state), Some(3_u64));
   `sas_plus::Projection`, and (optional features) merge-and-shrink and saturated cost
   partitioning
 
-Not yet implemented: succinct macro plans for red-black
-DAGs and the other gaps listed in [docs/design.md](https://github.com/sunsided/planning-heuristics/blob/main/docs/design.md).
+Deliberate omissions (succinct macro plans and black derived variables in red-black, among
+others) and open points are listed in [docs/design.md](https://github.com/sunsided/planning-heuristics/blob/main/docs/design.md).
 
 The `Heuristic` trait, `heuristic_fn` and `HeuristicFn` are
 [search-core](https://github.com/sunsided/search-core)'s, re-exported from the crate root, so
