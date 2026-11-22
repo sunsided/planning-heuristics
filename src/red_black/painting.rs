@@ -3,18 +3,22 @@
 mod invertible;
 mod strategy;
 
+use alloc::borrow::Cow;
 use alloc::vec::Vec;
 use core::fmt;
 
 use sas_plus::{CausalGraph, State, Task, VarId};
+
+use crate::lm_cut::contexts::{self, Split};
 
 use invertible::is_rse_invertible;
 pub use strategy::Strategy;
 
 /// A choice of black variables for [`crate::RedBlack`]; every other variable is red.
 ///
-/// Black variables must be state variables that no axiom and no conditional effect mentions
-/// (as condition or as effect), and, for [`Painting::new`], no two may be linked in the
+/// Black variables must be state variables that no axiom mentions and, after conditional
+/// effects are compiled away (see below), no conditional effect mentions (as condition or as
+/// effect), and, for [`Painting::new`], no two may be linked in the
 /// causal graph ([`Painting::dag`] allows an acyclic causal graph on them). So an operator
 /// changes at most one black variable, and an operator that changes a black variable has no
 /// precondition on another: moving one black variable never disturbs another, which is what
@@ -27,6 +31,15 @@ pub use strategy::Strategy;
 /// of Katz, Hoffmann & Domshlak (AAAI 2013, Corollary 2 and Theorem 2) and Domshlak, Hoffmann
 /// & Katz (AIJ 2015, Theorem 11). [`Painting::new`] and [`Painting::dag`] do not check it; every
 /// strategy constructor paints only RSE-invertible variables.
+///
+/// Conditional effects are compiled away first, in the spirit of the "multiply out"
+/// compilation Domshlak, Hoffmann & Katz name for their planners (AIJ 2015, Section 7.3,
+/// Table 9): each operator is split into one copy per assignment of the variables its effect
+/// conditions mention, whose effects are unconditional. The split is exact (every value of
+/// each such variable, no "any other" copy), so the compiled task has exactly the task's
+/// plans and a black variable cannot skip an effect it really triggers. All checks run on the compiled task, so a variable that only appears in
+/// conditional effects can be black; [`crate::RedBlack`] then repairs on the compiled task.
+/// Variables of an operator with more than 64 contexts stay ineligible.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Default)]
 pub struct Painting {
     /// The black variables, ascending.
@@ -73,7 +86,8 @@ pub enum PaintingError {
     Derived(VarId),
     /// An axiom has a condition on the variable.
     InAxiom(VarId),
-    /// A conditional effect sets the variable or has a condition on it.
+    /// A conditional effect that is too large to compile away (more than 64 contexts) sets
+    /// the variable or has a condition on it.
     ConditionalEffect(VarId),
     /// The two black variables are linked in the causal graph.
     Dependent(VarId, VarId),
@@ -92,7 +106,10 @@ impl fmt::Display for PaintingError {
             Self::Derived(v) => write!(f, "variable {v} is derived"),
             Self::InAxiom(v) => write!(f, "variable {v} appears in an axiom"),
             Self::ConditionalEffect(v) => {
-                write!(f, "variable {v} appears in a conditional effect")
+                write!(
+                    f,
+                    "variable {v} appears in a conditional effect with too many contexts to compile"
+                )
             }
             Self::Dependent(u, v) => {
                 write!(f, "variables {u} and {v} are linked in the causal graph")
@@ -131,6 +148,7 @@ impl Painting {
     ///   [`PaintingError::ConditionalEffect`] if a variable is not eligible;
     /// - [`PaintingError::Dependent`] for the first two linked variables.
     pub fn new(task: &Task, black: Vec<VarId>) -> Result<Self, PaintingError> {
+        let task = &*compiled(task);
         let black = eligible(task, black)?;
 
         let graph = CausalGraph::new(task);
@@ -196,6 +214,7 @@ impl Painting {
     /// assert_eq!(Painting::dag(&task, vec![0, 1]).unwrap().black(), [0, 1]);
     /// ```
     pub fn dag(task: &Task, black: Vec<VarId>) -> Result<Self, PaintingError> {
+        let task = &*compiled(task);
         let black = eligible(task, black)?;
 
         match cycle_arc(&CausalGraph::new(task), &black) {
@@ -212,6 +231,7 @@ impl Painting {
     /// on the variables painted before. Valid for [`Painting::dag`].
     #[must_use]
     pub fn greedy_dag(task: &Task) -> Self {
+        let task = &*compiled(task);
         let mut candidates = repairable(task);
         candidates.sort_by_key(|&v| (task.variables[v].domain_size, v));
         let graph = CausalGraph::new(task);
@@ -241,6 +261,7 @@ impl Painting {
     /// the original arc. Moving a black variable back is then always possible once it moved.
     #[must_use]
     pub fn greedy(task: &Task) -> Self {
+        let task = &*compiled(task);
         let mut candidates = repairable(task);
         candidates.sort_by_key(|&v| (task.variables[v].domain_size, v));
 
@@ -449,7 +470,7 @@ impl Painting {
         fragment: Fragment,
     ) -> Self {
         Self {
-            black: strategy::paint_with(task, state, strategy, fragment),
+            black: strategy::paint_with(&compiled(task), state, strategy, fragment),
             bounded: false,
         }
     }
@@ -511,7 +532,7 @@ impl Painting {
     /// assert!(Painting::bounded(&task, vec![0, 1]).unwrap().is_bounded());
     /// ```
     pub fn bounded(task: &Task, black: Vec<VarId>) -> Result<Self, PaintingError> {
-        let black = eligible(task, black)?;
+        let black = eligible(&compiled(task), black)?;
         let mut product: usize = 1;
         for &v in &black {
             let size = task.variables[v].domain_size as usize;
@@ -538,6 +559,21 @@ impl Painting {
     pub fn black(&self) -> &[VarId] {
         &self.black
     }
+}
+
+/// Most context copies per operator when conditional effects are compiled away for
+/// red-black planning.
+const MAX_CONTEXTS: usize = 64;
+
+/// `task` with its conditional effects compiled away by context splitting (operators with too
+/// many contexts keep theirs); `None` if `task` has no conditional effects.
+pub(super) fn split(task: &Task) -> Option<Split> {
+    contexts::split_exact(task, MAX_CONTEXTS)
+}
+
+/// The task the painting checks run on: `task` with its conditional effects compiled away.
+fn compiled(task: &Task) -> Cow<'_, Task> {
+    split(task).map_or(Cow::Borrowed(task), |s| Cow::Owned(s.task))
 }
 
 /// `black` sorted and deduplicated, after checking each variable exists and is eligible.

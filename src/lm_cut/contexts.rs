@@ -31,6 +31,19 @@ type Choice = Option<u32>;
 /// with the same effects, so the compiled task has every plan of the original; the
 /// "any other" copies only add options. `None` if `task` has no conditional effects.
 pub(crate) fn split(task: &Task, max_contexts: usize) -> Option<Split> {
+    split_by(task, max_contexts, false)
+}
+
+/// As [`split`], but exact: a context assigns each variable one of all its values, with no
+/// "any other" option, so exactly one copy of an operator applies in each state and the
+/// compiled task has exactly the plans of the original (for red-black planning, where an
+/// "any other" copy would let a black variable skip an effect it really triggers).
+pub(crate) fn split_exact(task: &Task, max_contexts: usize) -> Option<Split> {
+    split_by(task, max_contexts, true)
+}
+
+/// [`split`], or with `exact` [`split_exact`].
+fn split_by(task: &Task, max_contexts: usize, exact: bool) -> Option<Split> {
     let conditional = |op: &Operator| op.eff.iter().any(|e| !e.conditions.is_empty());
     if !task.operators.iter().any(conditional) {
         return None;
@@ -38,8 +51,10 @@ pub(crate) fn split(task: &Task, max_contexts: usize) -> Option<Split> {
 
     let mut operators = Vec::new();
     let mut op_of = Vec::new();
+    let domains: Option<Vec<u32>> =
+        exact.then(|| task.variables.iter().map(|v| v.domain_size).collect());
     for (id, op) in task.operators.iter().enumerate() {
-        let copies = split_operator(op, max_contexts);
+        let copies = split_operator(op, max_contexts, domains.as_deref());
         for copy in copies.unwrap_or_else(|| alloc::vec![op.clone()]) {
             operators.push(copy);
             op_of.push(id);
@@ -55,8 +70,14 @@ pub(crate) fn split(task: &Task, max_contexts: usize) -> Option<Split> {
     })
 }
 
-/// The context copies of `op`; `None` if it has more than `max_contexts` contexts.
-fn split_operator(op: &Operator, max_contexts: usize) -> Option<Vec<Operator>> {
+/// The context copies of `op`; `None` if it has more than `max_contexts` contexts. With the
+/// variables' `domains`, every context variable takes each of its values instead of the
+/// mentioned ones plus "any other".
+fn split_operator(
+    op: &Operator,
+    max_contexts: usize,
+    domains: Option<&[u32]>,
+) -> Option<Vec<Operator>> {
     let effects = simplified_effects(op);
     let mut vars: Vec<(VarId, Vec<Choice>)> = Vec::new();
     for c in effects.iter().flat_map(|e| &e.conditions) {
@@ -67,11 +88,21 @@ fn split_operator(op: &Operator, max_contexts: usize) -> Option<Vec<Operator>> {
         }
     }
 
+    // In exact mode a variable has one choice per value; count before building them, so a
+    // huge domain is rejected without being materialized.
+    let choices =
+        |(var, choices): &(VarId, Vec<Choice>)| domains.map_or(choices.len(), |d| d[*var] as usize);
     let count = vars
         .iter()
-        .try_fold(1_usize, |n, (_, choices)| n.checked_mul(choices.len()))?;
+        .try_fold(1_usize, |n, v| n.checked_mul(choices(v)))?;
     if count > max_contexts {
         return None;
+    }
+
+    if let Some(domains) = domains {
+        for (var, choices) in &mut vars {
+            *choices = (0..domains[*var]).map(Some).collect();
+        }
     }
 
     let copies = (0..count)
@@ -178,9 +209,9 @@ mod tests {
             ],
             cost: 3,
         };
-        let copies = split_operator(&op, 6).unwrap();
+        let copies = split_operator(&op, 6, None).unwrap();
         assert_eq!(copies.len(), 6);
-        assert!(split_operator(&op, 5).is_none());
+        assert!(split_operator(&op, 5, None).is_none());
 
         let effects_with = |pre: &[Fact]| -> Vec<Fact> {
             let copy = copies.iter().find(|c| c.pre[1..] == *pre).unwrap();
@@ -197,5 +228,24 @@ mod tests {
             effects_with(&[Fact::new(0, 2), Fact::new(1, 1)]),
             [Fact::new(3, 1), Fact::new(6, 1)]
         );
+    }
+
+    /// In exact mode a context variable takes every value of its domain, and a domain too
+    /// large for the limit is rejected before its values are built.
+    #[test]
+    fn exact_copies_take_every_value() {
+        let op = Operator {
+            name: "op".into(),
+            pre: alloc::vec![],
+            eff: alloc::vec![Effect {
+                conditions: alloc::vec![Fact::new(0, 1)],
+                fact: Fact::new(1, 1)
+            }],
+            cost: 1,
+        };
+        let copies = split_operator(&op, 64, Some(&[3, 2])).unwrap();
+        assert_eq!(copies.len(), 3);
+        assert!(copies.iter().all(|c| c.pre.len() == 1));
+        assert!(split_operator(&op, 64, Some(&[u32::MAX, 2])).is_none());
     }
 }

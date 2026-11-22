@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 
 use planning_heuristics::{
     CausalLevel, Fragment, HFf, HMax, Painting, PaintingError, RedBlack, RedBlackOptions,
-    Relaxation, Strategy,
+    RedBlackPlan, Relaxation, Strategy,
 };
 use sas_plus::random::{RandomTaskParams, random_task};
 use sas_plus::{Axiom, Effect, Fact, OpId, Operator, State, Task, Variable};
@@ -142,6 +142,61 @@ const STRATEGIES: [&str; 20] = [
     "random-dag",
 ];
 
+/// Whether `plan` is valid for `state` with `black` painted black: a red-black plan, checked
+/// by [`is_red_black_plan`]. If a black variable appears in a conditional effect, the
+/// heuristic runs on the task with conditional effects compiled into context copies, whose
+/// red-black semantics fix one red-true value per red context variable, where the original
+/// operator fires the effects of all of them.
+/// The simulator does not know the copies, so only the weaker property is checked there: the
+/// plan is a relaxed plan of `task` (every red-black plan of the compiled task is one).
+fn is_valid_plan(task: &Task, black: &[usize], state: &State, plan: &[OpId]) -> bool {
+    if is_compiled(task, black) {
+        oracle::is_relaxed_plan(task, state, plan)
+    } else {
+        is_red_black_plan(task, black, state, plan)
+    }
+}
+
+/// Whether the heuristic with `black` painted black runs on the task with its conditional
+/// effects compiled away: a black variable appears in a conditional effect.
+fn is_compiled(task: &Task, black: &[usize]) -> bool {
+    task.operators
+        .iter()
+        .flat_map(|op| &op.eff)
+        .filter(|e| !e.conditions.is_empty())
+        .any(|e| {
+            std::iter::once(&e.fact)
+                .chain(&e.conditions)
+                .any(|f| black.contains(&f.var))
+        })
+}
+
+/// Checks a plan that is not repaired: the fallback relaxed plan, costing `h_FF`. On a
+/// compiled task that is the compiled task's `h_FF`, which can differ from `ff` (the task's),
+/// so there only the plan itself is checked: a relaxed plan of `task` costing its operators.
+fn check_fallback(
+    task: &Task,
+    black: &[usize],
+    state: &State,
+    plan: &RedBlackPlan,
+    ff: Option<u64>,
+    ctx: &str,
+) {
+    if is_compiled(task, black) {
+        assert!(
+            oracle::is_relaxed_plan(task, state, plan.ops()),
+            "fallback, {ctx}"
+        );
+        assert_eq!(
+            oracle::plan_cost(task, plan.ops()),
+            plan.cost(),
+            "fallback, {ctx}"
+        );
+    } else {
+        assert_eq!(Some(plan.cost()), ff, "fallback is h_FF, {ctx}");
+    }
+}
+
 /// The painting of `task` by strategy `label` (see [`STRATEGIES`]).
 fn paint(task: &Task, label: &str) -> Painting {
     let fragment = if label.ends_with("-dag") {
@@ -235,15 +290,11 @@ fn check_bounded(name: &str, task: &Task) {
         };
 
         if !plan.is_repaired() {
-            assert_eq!(Some(plan.cost()), ff, "fallback is h_FF, {}", ctx());
+            check_fallback(task, &black, state, &plan, ff, &ctx());
             continue;
         }
 
-        assert!(
-            is_red_black_plan(task, &black, state, plan.ops()),
-            "{}",
-            ctx()
-        );
+        assert!(is_valid_plan(task, &black, state, plan.ops()), "{}", ctx());
         assert_eq!(
             oracle::plan_cost(task, plan.ops()),
             plan.cost(),
@@ -368,7 +419,9 @@ fn check_variant(
 
         assert_eq!(h_rb.value(state), Some(plan.cost()), "{}", ctx());
         // Following need not contain the relaxed plan; any red-black plan is a relaxed plan.
-        let bound = if options.follow {
+        // On a compiled task the repaired plan contains the compiled task's relaxed plan, whose
+        // cost need not be the task's `h_FF`.
+        let bound = if options.follow || is_compiled(task, &black) {
             h_max.value(state).expect("not a dead end")
         } else {
             ff
@@ -381,15 +434,11 @@ fn check_variant(
         );
         if !plan.is_repaired() {
             assert!(!in_fragment, "repair failed in the fragment, {}", ctx());
-            assert_eq!(plan.cost(), ff, "fallback is h_FF, {}", ctx());
+            check_fallback(task, &black, state, &plan, Some(ff), &ctx());
             continue;
         }
 
-        assert!(
-            is_red_black_plan(task, &black, state, plan.ops()),
-            "{}",
-            ctx()
-        );
+        assert!(is_valid_plan(task, &black, state, plan.ops()), "{}", ctx());
         if plan.is_plan_for(task, state) {
             assert!(
                 h_star.is_some_and(|h| h <= plan.cost()),
@@ -476,6 +525,65 @@ fn op(pre: Vec<Fact>, eff: Vec<Effect>) -> Operator {
     }
 }
 
+/// A switch toggled by conditional effects (`if s = 0 then s := 1`, `if s = 1 then s := 0`)
+/// can be black once they are compiled into context copies: `a` needs it on, `b` off, and it
+/// must end off. The relaxation keeps both values (`h_FF = 3`); black, it really toggles
+/// twice (`h_RB = 4 = h*`), and the plan is a real plan.
+#[test]
+fn black_variable_with_conditional_effects() {
+    let toggle = op(
+        vec![],
+        vec![
+            Effect {
+                conditions: vec![Fact::new(0, 0)],
+                fact: Fact::new(0, 1),
+            },
+            Effect {
+                conditions: vec![Fact::new(0, 1)],
+                fact: Fact::new(0, 0),
+            },
+        ],
+    );
+    let fetch_a = op(vec![Fact::new(0, 1)], vec![Effect::new(Fact::new(1, 1))]);
+    let fetch_b = op(vec![Fact::new(0, 0)], vec![Effect::new(Fact::new(2, 1))]);
+    let mut task = binary_task(3, vec![toggle, fetch_a, fetch_b]);
+    task.goal = vec![Fact::new(1, 1), Fact::new(2, 1), Fact::new(0, 0)];
+    let state = task.initial_state();
+
+    let painting = Painting::greedy(&task);
+    assert_eq!(painting.black(), [0]);
+    assert_eq!(HFf::new(&task).value(&state), Some(3));
+    let plan = RedBlack::with_painting(&task, &painting)
+        .plan(&state)
+        .expect("solvable");
+    assert!(plan.is_repaired());
+    assert_eq!(plan.cost(), 4);
+    assert!(plan.is_plan_for(&task, &state));
+}
+
+/// A conditional effect with more than 64 contexts stays conditional, and its variables stay
+/// red: seven condition variables give `2^7` contexts.
+#[test]
+fn conditional_effects_too_large_to_compile_stay_red() {
+    let many = op(
+        vec![],
+        vec![Effect {
+            conditions: (1..=7).map(|v| Fact::new(v, 1)).collect(),
+            fact: Fact::new(0, 1),
+        }],
+    );
+    let task = binary_task(8, vec![many]);
+
+    assert_eq!(
+        Painting::new(&task, vec![0]),
+        Err(PaintingError::ConditionalEffect(0))
+    );
+    assert_eq!(
+        Painting::new(&task, vec![3]),
+        Err(PaintingError::ConditionalEffect(3))
+    );
+}
+
 /// Paintings that break the restrictions are rejected with the reason.
 #[test]
 fn invalid_paintings_are_rejected() {
@@ -499,8 +607,9 @@ fn invalid_paintings_are_rejected() {
 
     let new = |black: Vec<usize>| Painting::new(&task, black);
     assert_eq!(new(vec![0, 1]), Err(PaintingError::InAxiom(1)));
-    assert_eq!(new(vec![0, 2]), Err(PaintingError::ConditionalEffect(2)));
-    assert_eq!(new(vec![3]), Err(PaintingError::ConditionalEffect(3)));
+    // Conditional effects are compiled away, so their variables can be black.
+    assert!(new(vec![2]).is_ok());
+    assert!(new(vec![3]).is_ok());
     assert_eq!(new(vec![4]), Err(PaintingError::Derived(4)));
     assert_eq!(new(vec![7]), Err(PaintingError::UnknownVariable(7)));
     assert!(new(vec![0]).is_ok());
@@ -744,7 +853,7 @@ fn conditional_side_effects_do_not_invert() {
     let mut task = binary_task(4, vec![up, down, get_g]);
     task.goal = vec![Fact::new(g, 1), Fact::new(v, 0)];
 
-    assert_eq!(Painting::greedy(&task).black(), [] as [usize; 0]);
+    assert!(!Painting::greedy(&task).black().contains(&v));
     let explicit = Painting::new(&task, vec![v]).unwrap();
     let plan = RedBlack::with_painting(&task, &explicit)
         .plan(&task.initial_state())
