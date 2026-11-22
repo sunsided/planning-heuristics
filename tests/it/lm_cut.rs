@@ -44,10 +44,22 @@ fn goal_reachable_without(task: &Task, start: &State, banned: &[OpId]) -> bool {
 /// partitioning, so callers can check the test is not vacuous.
 fn check_lm_cut(name: &str, task: &Task) -> (usize, usize) {
     let relaxation = Relaxation::new(task);
-    let conditional = task
-        .operators
-        .iter()
-        .any(|o| o.eff.iter().any(|e| !e.conditions.is_empty()));
+    // Conditional means some operator's effects fire under different conditions; effects
+    // whose conditions contradict never fire and get no rule.
+    let conditional = task.operators.iter().any(|o| {
+        let mut conditions = o.eff.iter().filter_map(|e| {
+            let mut facts: Vec<_> = o.pre.iter().chain(&e.conditions).collect();
+            facts.sort_unstable();
+            facts.dedup();
+            facts
+                .windows(2)
+                .all(|w| w[0].var != w[1].var)
+                .then_some(facts)
+        });
+        conditions
+            .next()
+            .is_some_and(|first| conditions.any(|c| c != first))
+    });
     let mut unsplit = LmCut::with_relaxation(&relaxation);
     assert_eq!(unsplit.is_exact(), !conditional, "{name}");
     let mut split = LmCut::new(task);

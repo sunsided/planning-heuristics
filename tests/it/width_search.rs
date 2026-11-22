@@ -1,13 +1,16 @@
 //! `h_add` agrees with width-search's own implementation (`SasProblem::h_add`).
 //!
-//! Equal values on tasks without axioms and without effect conditions that repeat a
-//! precondition fact. Elsewhere the two differ, and ours must be at most theirs wherever both
-//! are finite:
+//! Equal values on tasks without axioms and without effect conditions that repeat or contradict
+//! a precondition fact. Elsewhere the two differ; without contradicting effects ours must be at
+//! most theirs wherever both are finite:
 //!
 //! - with axioms width-search does not treat derived defaults as free, so it can report a dead
 //!   end or a higher cost;
 //! - width-search does not deduplicate a rule's conditions, so a fact that is both a
 //!   precondition and an effect condition counts twice in its sum.
+//!
+//! An effect whose conditions contradict each other or the preconditions never fires; ours drops
+//! it, width-search keeps it, so there ours can be higher or a dead end.
 
 use planning_heuristics::HAdd;
 use sas_plus::Task;
@@ -20,13 +23,14 @@ use crate::{fixtures, oracle};
 fn compare(name: &str, task: &Task) {
     let mut ours = HAdd::new(task);
     let theirs = SasProblem::new(task);
-    let exact = task.axioms.is_empty() && !repeats_precondition(task);
+    let contradicts = contradicts(task);
+    let exact = task.axioms.is_empty() && !repeats_precondition(task) && !contradicts;
 
     for state in oracle::perfect(task).keys() {
         let (a, b) = (ours.value(state), theirs.h_add(state));
         if exact {
             assert_eq!(a, b, "{name}, state {:?}", state.0);
-        } else if let (Some(a), Some(b)) = (a, b) {
+        } else if let (false, Some(a), Some(b)) = (contradicts, a, b) {
             assert!(a <= b, "{name}, state {:?}: ours {a} > theirs {b}", state.0);
         }
     }
@@ -69,5 +73,18 @@ fn repeats_precondition(task: &Task) -> bool {
         op.eff
             .iter()
             .any(|e| e.conditions.iter().any(|c| op.pre.contains(c)))
+    })
+}
+
+/// Whether some effect of `task` has conditions that contradict each other or its operator's
+/// preconditions.
+fn contradicts(task: &Task) -> bool {
+    task.operators.iter().any(|op| {
+        op.eff.iter().any(|e| {
+            let facts: Vec<_> = op.pre.iter().chain(&e.conditions).collect();
+            facts
+                .iter()
+                .any(|f| facts.iter().any(|g| g.var == f.var && g.value != f.value))
+        })
     })
 }
