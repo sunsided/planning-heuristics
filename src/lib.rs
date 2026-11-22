@@ -6,7 +6,7 @@
 //!
 //! - [`HMax`], [`HAdd`] and [`HFf`]: the delete-relaxation heuristics `h_max`, `h_add` and
 //!   `h_FF` (Bonet & Geffner 2001, Hoffmann & Nebel 2001), computed with a worklist
-//!   (generalized Dijkstra) over [`Relaxation`], which also extracts [`RelaxedPlan`]s.
+//!   (generalized Dijkstra) over [`Relaxation`], which also extracts [`RelaxedPlan`]s and their preferred operators.
 //! - [`HSetAdd`]: the set-additive heuristic `h_sa` (Keyder & Geffner 2008); [`AdditiveHMax`]:
 //!   `h_max` summed over a partition of the operator costs; [`H2`]: `h²` (Haslum & Geffner
 //!   2000), which sees pairs of facts.
@@ -37,10 +37,6 @@
 //!   inadmissible, over a partially explored backtracking tree.
 //! - [`GoalIntention`]: goal-intention ranking keys `ol_rp` / `op_rp` (Rosa et al. 2026) from
 //!   sampled relaxed plans, tracked along a path with [`IntentionTracker`].
-//!
-//! ## Not yet implemented
-//!
-//! - Preferred operators
 //!
 //! ## Example
 //!
