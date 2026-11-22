@@ -17,8 +17,6 @@ const MAX_CONTEXTS: usize = 1024;
 /// Why [`H2::new`] cannot handle a task.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum H2Error {
-    /// The task has axioms; `h²` over derived variables is not implemented.
-    Axioms,
     /// Operator `0` has more than 1024 effect contexts, too many to compile its conditional
     /// effects away.
     TooManyContexts(usize),
@@ -27,7 +25,6 @@ pub enum H2Error {
 impl fmt::Display for H2Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
-            Self::Axioms => write!(f, "h2 does not support axioms"),
             Self::TooManyContexts(op) => {
                 write!(f, "operator {op} has too many conditional effect contexts")
             }
@@ -51,6 +48,15 @@ struct Op {
     cost: u64,
 }
 
+/// One axiom in the form `h²` needs: fact ids.
+#[derive(Clone, Debug)]
+struct Rule {
+    /// Body fact ids, ascending.
+    body: Vec<usize>,
+    /// The derived fact.
+    head: usize,
+}
+
 /// The `h²` heuristic (Haslum & Geffner 2000): the cost of the cheapest regression where every
 /// set of more than two facts costs as much as its most expensive pair. Admissible, at least
 /// `h_max`, and it sees deletes: two facts that no plan makes true together cost more than
@@ -64,7 +70,14 @@ struct Op {
 ///
 /// Conditional effects are compiled away by splitting operators by context (as in
 /// [`crate::LmCut::new`]); the copies have every plan of the task, so the estimate stays
-/// admissible. Axioms are not supported.
+/// admissible.
+///
+/// Axioms are cost-0 rules: an axiom with body `B` reaches its head at `h²(B)` and each pair
+/// `{head, q}` at `h²(B ∪ {q})`. The default value of a derived variable holds whenever its
+/// axioms stop firing, so it is free, as in the delete relaxation: `h²({d, q}) = h²(q)`. Both
+/// only lower values, and every pair of a reachable state is reached by them or by the
+/// operators, so the estimate stays admissible. States must have their derived variables
+/// evaluated.
 ///
 /// # Examples
 ///
@@ -102,6 +115,11 @@ pub struct H2 {
     var_of: Vec<VarId>,
     /// The operators, conditional effects compiled away.
     ops: Vec<Op>,
+    /// The axioms.
+    axioms: Vec<Rule>,
+    /// Whether each fact is the default value of a derived variable, true in every state for
+    /// `h²`.
+    free: Vec<bool>,
     /// The goal fact ids, ascending.
     goal: Vec<usize>,
     /// `h²` of each pair `(p, q)` at `p * facts + q`, symmetric; `(p, p)` is `h²(p)`.
@@ -113,14 +131,9 @@ impl H2 {
     ///
     /// # Errors
     ///
-    /// - [`H2Error::Axioms`] if the task has axioms;
-    /// - [`H2Error::TooManyContexts`] if an operator's conditional effects have more than
-    ///   1024 contexts.
+    /// [`H2Error::TooManyContexts`] if an operator's conditional effects have more than 1024
+    /// contexts.
     pub fn new(task: &Task) -> Result<Self, H2Error> {
-        if !task.axioms.is_empty() {
-            return Err(H2Error::Axioms);
-        }
-
         let split = contexts::split(task, MAX_CONTEXTS);
         let operators = split
             .as_ref()
@@ -158,12 +171,28 @@ impl H2 {
                 }
             })
             .collect();
+        let axioms = task
+            .axioms
+            .iter()
+            .map(|a| Rule {
+                body: sorted(a.conditions.iter().map(id)),
+                head: id(&a.head),
+            })
+            .collect();
+        let mut free = alloc::vec![false; var_of.len()];
+        for (var, v) in task.variables.iter().enumerate() {
+            if v.is_derived() {
+                free[offsets[var] + task.initial.0[var] as usize] = true;
+            }
+        }
         let goal = sorted(task.goal.iter().map(id));
 
         Ok(Self {
             offsets,
             var_of,
             ops,
+            axioms,
+            free,
             goal,
             table: Vec::new(),
         })
@@ -202,7 +231,7 @@ impl H2 {
         }
     }
 
-    /// One pass over all operators; returns whether a value improved.
+    /// One pass over all operators and axioms; returns whether a value improved.
     fn sweep(&mut self) -> bool {
         // Taken out so the table can be updated while the operators are read.
         let ops = core::mem::take(&mut self.ops);
@@ -219,37 +248,70 @@ impl H2 {
                     changed |= self.lower(p, q, reach);
                 }
 
-                changed |= self.extend_untouched(p, op, base);
+                changed |= self.extend_untouched(p, &op.pre, &op.eff_vars, base, op.cost);
             }
         }
-
         self.ops = ops;
+
+        let axioms = core::mem::take(&mut self.axioms);
+        for axiom in &axioms {
+            let base = self.of_set(&axiom.body);
+            if base != INF && !self.free[axiom.head] {
+                changed |= self.lower(axiom.head, axiom.head, base);
+                // An axiom changes no variable, so every other fact may hold beside its head.
+                changed |= self.extend_untouched(axiom.head, &axiom.body, &[], base, 0);
+            }
+        }
+        self.axioms = axioms;
 
         changed
     }
 
-    /// Lowers every pair `{p, q}` with `q` untouched by `op` (its variable not among the
-    /// effect variables) to `cost(op) + h²(pre(op) ∪ {q})`, given `base = h²(pre(op))`;
-    /// returns whether one improved.
-    fn extend_untouched(&mut self, p: usize, op: &Op, base: u64) -> bool {
+    /// Lowers every pair `{p, q}` with `q` untouched by an operator or axiom (its variable not
+    /// among `eff_vars`) to `cost + h²(pre ∪ {q})`, given `base = h²(pre)`; returns whether
+    /// one improved. Free facts are skipped: their pairs are never stored.
+    fn extend_untouched(
+        &mut self,
+        p: usize,
+        pre: &[usize],
+        eff_vars: &[VarId],
+        base: u64,
+        cost: u64,
+    ) -> bool {
         let n = self.var_of.len();
         let mut changed = false;
         for q in 0..n {
-            if op.eff_vars.binary_search(&self.var_of[q]).is_ok() {
+            if self.free[q] || eff_vars.binary_search(&self.var_of[q]).is_ok() {
                 continue;
             }
 
             let mut h = base.max(self.table[q * n + q]);
-            for &x in &op.pre {
-                h = h.max(self.table[x * n + q]);
+            for &x in pre {
+                h = h.max(self.pair(x, q));
             }
 
             if h != INF {
-                changed |= self.lower(p, q, h.saturating_add(op.cost));
+                changed |= self.lower(p, q, h.saturating_add(cost));
             }
         }
 
         changed
+    }
+
+    /// `h²` of the pair `{p, q}`; [`INF`] for two values of one variable, and otherwise a
+    /// free fact adds nothing to the other one.
+    fn pair(&self, p: usize, q: usize) -> u64 {
+        let n = self.var_of.len();
+        if p != q && self.var_of[p] == self.var_of[q] {
+            return INF;
+        }
+
+        match (self.free[p], self.free[q]) {
+            (true, true) => 0,
+            (true, false) => self.table[q * n + q],
+            (false, true) => self.table[p * n + p],
+            (false, false) => self.table[p * n + q],
+        }
     }
 
     /// Lowers the pair `{p, q}` to `value` if that improves it and the two facts can hold
@@ -271,13 +333,12 @@ impl H2 {
     }
 
     /// `h²` of a set of facts: the maximum over its facts and pairs; [`INF`] if two of them
-    /// are values of one variable.
+    /// are values of one state variable.
     fn of_set(&self, facts: &[usize]) -> u64 {
-        let n = self.var_of.len();
         let mut h = 0;
         for (k, &p) in facts.iter().enumerate() {
             for &q in &facts[k..] {
-                h = h.max(self.table[p * n + q]);
+                h = h.max(self.pair(p, q));
             }
         }
 

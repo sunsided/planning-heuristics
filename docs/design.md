@@ -197,6 +197,12 @@ default the relaxation would report false dead ends and `h_max <= h*` would fail
 States passed to the heuristics must have their derived variables evaluated (as produced by
 `Task::initial_state` and `Task::apply`).
 
+`h²` handles axioms the same way: an axiom with body `B` reaches its head at `h²(B)` and the
+pair `{head, q}` at `h²(B ∪ {q})` for every other fact `q`, and derived defaults are free
+(`h²({d, q}) = h²(q)`). Both only lower values. A derived fact of a reachable state has an
+axiom whose body holds there, so every pair of that state is still reached, and the estimate
+stays admissible. Tested against `h*` and `h_max` on random tasks with axioms (`tests/it/hm.rs`).
+
 ### Conditional effects
 
 Supported, not rejected: each effect is its own rule with precondition ∪ conditions, and the
