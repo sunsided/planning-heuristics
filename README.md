@@ -93,7 +93,7 @@ assert_eq!(h_ff.value(&state), Some(3_u64));
 ## Scope
 
 - `h_max`, `h_add` and `h_FF` with relaxed plan extraction and preferred operators (delete relaxation); the
-  set-additive `h_sa`; additive `h_max` over an operator partition; `h²` (no axioms)
+  set-additive `h_sa`; additive `h_max` over an operator partition; `h²`
 - Red-black heuristic `h_RB` (Katz, Hoffmann & Domshlak 2013; Domshlak, Hoffmann & Katz
   2015), checked against the papers: relaxed plan repair (optionally forwarded) or red facts
   following, every painting strategy of the papers (L, A, C, their inverses, C[N], CA[p],
@@ -117,7 +117,7 @@ assert_eq!(h_ff.value(&state), Some(3_u64));
   `sas_plus::Projection`, and (optional features) merge-and-shrink and saturated cost
   partitioning
 
-Not yet implemented: `h²` with axioms; succinct macro plans for red-black
+Not yet implemented: succinct macro plans for red-black
 DAGs and the other gaps listed in [docs/design.md](https://github.com/sunsided/planning-heuristics/blob/main/docs/design.md).
 
 The `Heuristic` trait, `heuristic_fn` and `HeuristicFn` are

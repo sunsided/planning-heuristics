@@ -3,7 +3,7 @@
 
 use std::collections::BTreeMap;
 
-use planning_heuristics::{AdditiveHMax, H2, H2Error, HAdd, HMax, HSetAdd, Relaxation};
+use planning_heuristics::{AdditiveHMax, H2, HAdd, HMax, HSetAdd, Relaxation};
 use sas_plus::random::{RandomTaskParams, random_task};
 use sas_plus::{Fact, State, Task};
 
@@ -157,23 +157,18 @@ fn set_cost(h: &BTreeMap<Vec<Fact>, u64>, set: &[Fact]) -> Option<u64> {
 }
 
 /// `h²` equals the oracle on tasks it shares with it, and on every task `h_max <= h² <= h*`
-/// with only real dead ends; it beats `h_max` somewhere.
+/// with only real dead ends; it beats `h_max` somewhere, also on tasks with axioms.
 #[test]
 fn h2_by_oracle_and_h_star() {
     let mut above = 0;
+    let mut above_with_axioms = 0;
     for (name, task) in tasks() {
-        let mut h2 = match H2::new(&task) {
-            Ok(h2) => h2,
-            Err(e) => {
-                assert_eq!(e, H2Error::Axioms, "{name}");
-                assert!(!task.axioms.is_empty(), "{name}");
-                continue;
-            }
-        };
-        let plain = task
-            .operators
-            .iter()
-            .all(|o| o.eff.iter().all(|e| e.conditions.is_empty()));
+        let mut h2 = H2::new(&task).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let plain = task.axioms.is_empty()
+            && task
+                .operators
+                .iter()
+                .all(|o| o.eff.iter().all(|e| e.conditions.is_empty()));
         let mut h_max = HMax::new(&task);
         for (state, h_star) in oracle::perfect(&task) {
             let ctx = || format!("{name}, state {:?}", state.0);
@@ -191,11 +186,15 @@ fn h2_by_oracle_and_h_star() {
             if let (Some(v), Some(m)) = (value, h_max.value(&state)) {
                 assert!(m <= v, "h_max {m} > h2 {v}, {}", ctx());
                 above += usize::from(v > m);
+                if !task.axioms.is_empty() {
+                    above_with_axioms += usize::from(v > m);
+                }
             }
         }
     }
 
     assert!(above > 0, "h2 never beats h_max");
+    assert!(above_with_axioms > 0, "h2 never beats h_max with axioms");
 }
 
 /// `h_sa <= h_add`, and `h_max <= h_sa` without conditional effects, with the same dead ends;
