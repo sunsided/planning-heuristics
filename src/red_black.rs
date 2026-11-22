@@ -210,6 +210,9 @@ pub struct RedBlack<'r> {
     /// The product compilation of a [`Painting::bounded`] painting, which replaces the
     /// repair by product search.
     product: Option<Product>,
+    /// If the heuristic runs on the task with its conditional effects compiled away (a
+    /// black variable appears in one), the task's operator behind each compiled one.
+    op_of: Option<Vec<OpId>>,
 }
 
 impl RedBlack<'static> {
@@ -233,6 +236,10 @@ impl RedBlack<'static> {
 impl<'r> RedBlack<'r> {
     /// Builds `h_RB` over a shared `relaxation` of `task` with `painting`.
     ///
+    /// If a black variable appears in a conditional effect, the heuristic runs on the task
+    /// with its conditional effects compiled away (see [`Painting`]) and builds that task's
+    /// relaxation itself; `relaxation` is then unused.
+    ///
     /// # Panics
     ///
     /// Panics if `painting` names a variable `task` does not have.
@@ -241,8 +248,20 @@ impl<'r> RedBlack<'r> {
         Self::build(task, Cow::Borrowed(relaxation), painting)
     }
 
-    /// The heuristic over `relaxation`, with the repair tables of `task` under `painting`.
+    /// The heuristic over `relaxation`, with the repair tables of `task` under `painting`; on
+    /// the compiled task if a black variable appears in a conditional effect.
     fn build(task: &Task, relaxation: Cow<'r, Relaxation>, painting: &Painting) -> Self {
+        let split = in_conditional_effect(task, painting.black())
+            .then(|| painting::split(task))
+            .flatten();
+        let (task, relaxation, op_of) = match &split {
+            Some(s) => (
+                &s.task,
+                Cow::Owned(Relaxation::new(&s.task)),
+                Some(s.op_of.clone()),
+            ),
+            None => (task, relaxation, None),
+        };
         let tables = Tables::new(task, &relaxation, painting.black());
         let product = painting
             .is_bounded()
@@ -257,6 +276,7 @@ impl<'r> RedBlack<'r> {
             options: RedBlackOptions::default(),
             relaxed: Vec::new(),
             product,
+            op_of,
         }
     }
 
@@ -314,11 +334,16 @@ impl<'r> RedBlack<'r> {
     #[must_use]
     pub fn plan(&mut self, state: &State) -> Option<RedBlackPlan> {
         let (cost, repaired) = self.run(state)?;
-        let ops = if repaired {
+        let mut ops = if repaired {
             self.repair.plan.clone()
         } else {
             self.workspace.plan.clone()
         };
+        if let Some(op_of) = &self.op_of {
+            for op in &mut ops {
+                *op = op_of[*op];
+            }
+        }
 
         Some(RedBlackPlan {
             ops,
@@ -360,6 +385,20 @@ impl<'r> RedBlack<'r> {
 
         Some(repaired.map_or((ff, false), |cost| (cost, true)))
     }
+}
+
+/// Whether one of the variables `black` appears in a conditional effect of `task`, as
+/// condition or effect.
+fn in_conditional_effect(task: &Task, black: &[VarId]) -> bool {
+    task.operators
+        .iter()
+        .flat_map(|op| &op.eff)
+        .filter(|e| !e.conditions.is_empty())
+        .any(|e| {
+            core::iter::once(&e.fact)
+                .chain(&e.conditions)
+                .any(|f| black.binary_search(&f.var).is_ok())
+        })
 }
 
 impl Heuristic<State> for RedBlack<'_> {

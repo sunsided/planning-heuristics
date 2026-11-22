@@ -142,6 +142,30 @@ const STRATEGIES: [&str; 20] = [
     "random-dag",
 ];
 
+/// Whether `plan` is valid for `state` with `black` painted black: a red-black plan, checked
+/// by [`is_red_black_plan`]. If a black variable appears in a conditional effect, the
+/// heuristic runs on the task with conditional effects compiled into context copies, whose
+/// red-black semantics may skip effects the original operator would fire on red conditions.
+/// The simulator does not know the copies, so only the weaker property is checked there: the
+/// plan is a relaxed plan of `task` (every red-black plan of the compiled task is one).
+fn is_valid_plan(task: &Task, black: &[usize], state: &State, plan: &[OpId]) -> bool {
+    let compiled = task
+        .operators
+        .iter()
+        .flat_map(|op| &op.eff)
+        .filter(|e| !e.conditions.is_empty())
+        .any(|e| {
+            std::iter::once(&e.fact)
+                .chain(&e.conditions)
+                .any(|f| black.contains(&f.var))
+        });
+    if compiled {
+        oracle::is_relaxed_plan(task, state, plan)
+    } else {
+        is_red_black_plan(task, black, state, plan)
+    }
+}
+
 /// The painting of `task` by strategy `label` (see [`STRATEGIES`]).
 fn paint(task: &Task, label: &str) -> Painting {
     let fragment = if label.ends_with("-dag") {
@@ -239,11 +263,7 @@ fn check_bounded(name: &str, task: &Task) {
             continue;
         }
 
-        assert!(
-            is_red_black_plan(task, &black, state, plan.ops()),
-            "{}",
-            ctx()
-        );
+        assert!(is_valid_plan(task, &black, state, plan.ops()), "{}", ctx());
         assert_eq!(
             oracle::plan_cost(task, plan.ops()),
             plan.cost(),
@@ -385,11 +405,7 @@ fn check_variant(
             continue;
         }
 
-        assert!(
-            is_red_black_plan(task, &black, state, plan.ops()),
-            "{}",
-            ctx()
-        );
+        assert!(is_valid_plan(task, &black, state, plan.ops()), "{}", ctx());
         if plan.is_plan_for(task, state) {
             assert!(
                 h_star.is_some_and(|h| h <= plan.cost()),
@@ -476,6 +492,108 @@ fn op(pre: Vec<Fact>, eff: Vec<Effect>) -> Operator {
     }
 }
 
+/// A switch toggled by conditional effects (`if s = 0 then s := 1`, `if s = 1 then s := 0`)
+/// can be black once they are compiled into context copies: `a` needs it on, `b` off, and it
+/// must end off. The relaxation keeps both values (`h_FF = 3`); black, it really toggles
+/// twice (`h_RB = 4 = h*`), and the plan is a real plan.
+#[test]
+fn black_variable_with_conditional_effects() {
+    let toggle = op(
+        vec![],
+        vec![
+            Effect {
+                conditions: vec![Fact::new(0, 0)],
+                fact: Fact::new(0, 1),
+            },
+            Effect {
+                conditions: vec![Fact::new(0, 1)],
+                fact: Fact::new(0, 0),
+            },
+        ],
+    );
+    let fetch_a = op(vec![Fact::new(0, 1)], vec![Effect::new(Fact::new(1, 1))]);
+    let fetch_b = op(vec![Fact::new(0, 0)], vec![Effect::new(Fact::new(2, 1))]);
+    let mut task = binary_task(3, vec![toggle, fetch_a, fetch_b]);
+    task.goal = vec![Fact::new(1, 1), Fact::new(2, 1), Fact::new(0, 0)];
+    let state = task.initial_state();
+
+    let painting = Painting::greedy(&task);
+    assert_eq!(painting.black(), [0]);
+    assert_eq!(HFf::new(&task).value(&state), Some(3));
+    let plan = RedBlack::with_painting(&task, &painting)
+        .plan(&state)
+        .expect("solvable");
+    assert!(plan.is_repaired());
+    assert_eq!(plan.cost(), 4);
+    assert!(plan.is_plan_for(&task, &state));
+}
+
+/// On the fixtures and random tasks with conditional effects, the strategies paint variables
+/// of conditional effects black, and the red-black estimate there exceeds `h_FF` somewhere.
+#[test]
+fn conditional_effect_variables_are_painted_black() {
+    let params = RandomTaskParams {
+        max_conditions: 2,
+        ..RandomTaskParams::default()
+    };
+    let tasks = fixtures::FIXTURES
+        .iter()
+        .map(|(name, _)| fixtures::load(name))
+        .chain((0..SEEDS).map(|seed| random_task(seed, params)));
+    let (mut painted, mut above) = (0, 0);
+    for task in tasks {
+        let in_conditional: Vec<usize> = task
+            .operators
+            .iter()
+            .flat_map(|op| &op.eff)
+            .filter(|e| !e.conditions.is_empty())
+            .flat_map(|e| std::iter::once(e.fact.var).chain(e.conditions.iter().map(|c| c.var)))
+            .collect();
+        for label in STRATEGIES {
+            let painting = paint(&task, label);
+            if !painting.black().iter().any(|v| in_conditional.contains(v)) {
+                continue;
+            }
+
+            painted += 1;
+            let mut h_rb = RedBlack::with_painting(&task, &painting);
+            let mut h_ff = HFf::new(&task);
+            for state in oracle::perfect(&task).keys() {
+                above += usize::from(h_rb.value(state) > h_ff.value(state));
+            }
+        }
+    }
+
+    assert!(
+        painted > 0,
+        "no strategy paints a conditional effect variable black"
+    );
+    assert!(above > 0, "h_RB never exceeds h_FF with such a painting");
+}
+
+/// A conditional effect with more than 64 contexts stays conditional, and its variables stay
+/// red: seven condition variables give `2^7` contexts.
+#[test]
+fn conditional_effects_too_large_to_compile_stay_red() {
+    let many = op(
+        vec![],
+        vec![Effect {
+            conditions: (1..=7).map(|v| Fact::new(v, 1)).collect(),
+            fact: Fact::new(0, 1),
+        }],
+    );
+    let task = binary_task(8, vec![many]);
+
+    assert_eq!(
+        Painting::new(&task, vec![0]),
+        Err(PaintingError::ConditionalEffect(0))
+    );
+    assert_eq!(
+        Painting::new(&task, vec![3]),
+        Err(PaintingError::ConditionalEffect(3))
+    );
+}
+
 /// Paintings that break the restrictions are rejected with the reason.
 #[test]
 fn invalid_paintings_are_rejected() {
@@ -499,8 +617,9 @@ fn invalid_paintings_are_rejected() {
 
     let new = |black: Vec<usize>| Painting::new(&task, black);
     assert_eq!(new(vec![0, 1]), Err(PaintingError::InAxiom(1)));
-    assert_eq!(new(vec![0, 2]), Err(PaintingError::ConditionalEffect(2)));
-    assert_eq!(new(vec![3]), Err(PaintingError::ConditionalEffect(3)));
+    // Conditional effects are compiled away, so their variables can be black.
+    assert!(new(vec![2]).is_ok());
+    assert!(new(vec![3]).is_ok());
     assert_eq!(new(vec![4]), Err(PaintingError::Derived(4)));
     assert_eq!(new(vec![7]), Err(PaintingError::UnknownVariable(7)));
     assert!(new(vec![0]).is_ok());
@@ -744,7 +863,7 @@ fn conditional_side_effects_do_not_invert() {
     let mut task = binary_task(4, vec![up, down, get_g]);
     task.goal = vec![Fact::new(g, 1), Fact::new(v, 0)];
 
-    assert_eq!(Painting::greedy(&task).black(), [] as [usize; 0]);
+    assert!(!Painting::greedy(&task).black().contains(&v));
     let explicit = Painting::new(&task, vec![v]).unwrap();
     let plan = RedBlack::with_painting(&task, &explicit)
         .plan(&task.initial_state())

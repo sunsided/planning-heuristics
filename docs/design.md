@@ -218,8 +218,19 @@ C); Domshlak, Hoffmann & Katz, *Red-Black Planning: A New Systematic Approach to
 Delete Relaxation*, AIJ 221, 2015 (the journal version: Figures 4, 7 and 8, paintings L, A,
 C). All three were checked against the PDFs.
 
-- Painting: black variables must be state variables outside axioms and conditional effects
-  (as condition or effect). `Painting::new` additionally requires them pairwise unlinked in
+- Conditional effects are compiled away first, as the AIJ paper's planners do (Section 7.3,
+  Table 9: a "multiply out" compilation): every operator is split into one copy per context
+  of its effect conditions (`lm_cut::contexts`, at most 64 contexts per operator), with
+  unconditional effects. Paintings are checked and chosen on the compiled task; `RedBlack`
+  repairs on it (with its own relaxation) only when a black variable appears in a
+  conditional effect, and maps plan operators back to the task's. So the estimates of
+  paintings without such variables are unchanged. The compiled task's red-black semantics
+  may skip an effect the original operator would fire on a red condition (the "any other"
+  copy); the tests check those plans as relaxed plans of the original task instead of with
+  the red-black simulator. `h_RB >= h_FF` (the original's) holds on every test task, though
+  only `h_RB >= h_FF` of the compiled task follows from the construction.
+- Painting: black variables must be state variables outside axioms and outside conditional
+  effects too large to compile (as condition or effect). `Painting::new` additionally requires them pairwise unlinked in
   `sas_plus::CausalGraph` (the arcless fragment), `Painting::dag` an acyclic black causal
   graph. Either way an operator changes at most one black variable (two black effects link
   them both ways: the causal graph has effect-effect arcs). Neither checks RSE-invertibility;
@@ -263,7 +274,7 @@ C). All three were checked against the PDFs.
   plans; with explicit plans, as here and in the papers' implementation (AIJ Section 5.3.1),
   Figure 7 is polynomial in the returned plan length, which is worst-case exponential
   (Proposition 2). Hence the budget `1024 + 64 · |relaxed plan|` operators.
-- Succinct macro plans, not done. The papers only cite them (Chen & Giménez 2008, Theorem 23,
+- Succinct macro plans, won't do (#4). The papers only cite them (Chen & Giménez 2008, Theorem 23,
   with Helmert's Observation 7) and describe them in one sentence ("recursive macros for
   value pairs within DTGs"); the construction itself is not in any of the three papers. The
   AIJ paper also argues against them (Section 5.3.1): macros must be rebuilt for every
@@ -281,10 +292,11 @@ C). All three were checked against the PDFs.
   state. Conditions on derived variables count as active when they hold in the red-black
   state (the real state is not closed under the axioms). Regression test
   `black_moves_prefer_paths_with_active_red_conditions`.
-- Not done: black variables with conditional effects, black derived variables, and the AIJ
-  enumeration of SCC-changing action sequences for the
-  fixed-number fragment (its tighter `2k - 2` bound is a proof device; the ICAPS tree search
-  is implemented instead).
+- Won't do: black derived variables (#7): no operator sets one, so there are no DTG arcs to
+  move along, RSE-invertibility does not apply, and none of the papers treats them. The AIJ
+  enumeration of SCC-changing action sequences for the fixed-number fragment (#9): its
+  tighter `2k - 2` bound is a proof device, exponential in `k`, which the authors call of
+  doubtful practical value; the ICAPS tree search (`product.rs`) solves the same fragment.
 
 ### Paper comparison
 
@@ -302,7 +314,7 @@ C). All three were checked against the PDFs.
 | `F` fixed per `ACHIEVE` call | `F` grows with red side effects of inserted moves | deliberate deviation: a superset of arcs over the same black values, so solvability is kept (AIJ 5.3.1 extends DTGs with red side effects too) |
 | `ACYCLIC PLANNING`: leaves to roots, shortest DTG path per required value, black outside conditions left to parents (AIJ Fig. 7) | recursive `move_black`, black preconditions sorted descendants first | matches (same operator order, computed on demand) |
 | No relaxed plan: `h = ∞`; otherwise repair succeeds (AIJ Sec. 5) | `None` for dead ends; `h_FF` fallback outside the fragment | matches in the fragment; fallback is our extension for user paintings |
-| Painting, Fig. 8: start red = not RSE-invertible or causal graph leaf; paint red until in fragment; post-process back to front | `painting/strategy.rs::paint` | matches; ineligible variables (axioms, conditional effects, derived) also start red, since the repair does not support them black |
+| Painting, Fig. 8: start red = not RSE-invertible or causal graph leaf; paint red until in fragment; post-process back to front | `painting/strategy.rs::paint` | matches; ineligible variables (axioms, conditional effects too large to compile, derived) also start red, since the repair does not support them black |
 | L: paint red the highest causal graph level (closest to leaves) | `causal_graph_level(.., Top, ..)`, longest path from a source in the condensed causal graph, ties to the higher variable id | deliberate deviation: Fast Downward's cg-heuristic level is not available; for translator output the variable id follows that order |
 | L̄: lowest level first | `CausalLevel::Bottom` | matches (same level proxy) |
 | A: most incident arcs to black variables, ties smaller domain, then L | `incident_arcs` (each direction counts) | matches |
