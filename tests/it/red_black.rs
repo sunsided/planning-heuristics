@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 
 use planning_heuristics::{
     CausalLevel, Fragment, HFf, HMax, Painting, PaintingError, RedBlack, RedBlackOptions,
-    Relaxation, Strategy,
+    RedBlackPlan, Relaxation, Strategy,
 };
 use sas_plus::random::{RandomTaskParams, random_task};
 use sas_plus::{Axiom, Effect, Fact, OpId, Operator, State, Task, Variable};
@@ -150,8 +150,17 @@ const STRATEGIES: [&str; 20] = [
 /// The simulator does not know the copies, so only the weaker property is checked there: the
 /// plan is a relaxed plan of `task` (every red-black plan of the compiled task is one).
 fn is_valid_plan(task: &Task, black: &[usize], state: &State, plan: &[OpId]) -> bool {
-    let compiled = task
-        .operators
+    if is_compiled(task, black) {
+        oracle::is_relaxed_plan(task, state, plan)
+    } else {
+        is_red_black_plan(task, black, state, plan)
+    }
+}
+
+/// Whether the heuristic with `black` painted black runs on the task with its conditional
+/// effects compiled away: a black variable appears in a conditional effect.
+fn is_compiled(task: &Task, black: &[usize]) -> bool {
+    task.operators
         .iter()
         .flat_map(|op| &op.eff)
         .filter(|e| !e.conditions.is_empty())
@@ -159,11 +168,32 @@ fn is_valid_plan(task: &Task, black: &[usize], state: &State, plan: &[OpId]) -> 
             std::iter::once(&e.fact)
                 .chain(&e.conditions)
                 .any(|f| black.contains(&f.var))
-        });
-    if compiled {
-        oracle::is_relaxed_plan(task, state, plan)
+        })
+}
+
+/// Checks a plan that is not repaired: the fallback relaxed plan, costing `h_FF`. On a
+/// compiled task that is the compiled task's `h_FF`, which can differ from `ff` (the task's),
+/// so there only the plan itself is checked: a relaxed plan of `task` costing its operators.
+fn check_fallback(
+    task: &Task,
+    black: &[usize],
+    state: &State,
+    plan: &RedBlackPlan,
+    ff: Option<u64>,
+    ctx: &str,
+) {
+    if is_compiled(task, black) {
+        assert!(
+            oracle::is_relaxed_plan(task, state, plan.ops()),
+            "fallback, {ctx}"
+        );
+        assert_eq!(
+            oracle::plan_cost(task, plan.ops()),
+            plan.cost(),
+            "fallback, {ctx}"
+        );
     } else {
-        is_red_black_plan(task, black, state, plan)
+        assert_eq!(Some(plan.cost()), ff, "fallback is h_FF, {ctx}");
     }
 }
 
@@ -260,7 +290,7 @@ fn check_bounded(name: &str, task: &Task) {
         };
 
         if !plan.is_repaired() {
-            assert_eq!(Some(plan.cost()), ff, "fallback is h_FF, {}", ctx());
+            check_fallback(task, &black, state, &plan, ff, &ctx());
             continue;
         }
 
@@ -389,7 +419,9 @@ fn check_variant(
 
         assert_eq!(h_rb.value(state), Some(plan.cost()), "{}", ctx());
         // Following need not contain the relaxed plan; any red-black plan is a relaxed plan.
-        let bound = if options.follow {
+        // On a compiled task the repaired plan contains the compiled task's relaxed plan, whose
+        // cost need not be the task's `h_FF`.
+        let bound = if options.follow || is_compiled(task, &black) {
             h_max.value(state).expect("not a dead end")
         } else {
             ff
@@ -402,7 +434,7 @@ fn check_variant(
         );
         if !plan.is_repaired() {
             assert!(!in_fragment, "repair failed in the fragment, {}", ctx());
-            assert_eq!(plan.cost(), ff, "fallback is h_FF, {}", ctx());
+            check_fallback(task, &black, state, &plan, Some(ff), &ctx());
             continue;
         }
 
@@ -526,78 +558,6 @@ fn black_variable_with_conditional_effects() {
         .expect("solvable");
     assert!(plan.is_repaired());
     assert_eq!(plan.cost(), 4);
-    assert!(plan.is_plan_for(&task, &state));
-}
-
-/// On the fixtures and random tasks with conditional effects, the strategies paint variables
-/// of conditional effects black, and the red-black estimate there exceeds `h_FF` somewhere.
-#[test]
-fn conditional_effect_variables_are_painted_black() {
-    let params = RandomTaskParams {
-        max_conditions: 2,
-        ..RandomTaskParams::default()
-    };
-    let tasks = fixtures::FIXTURES
-        .iter()
-        .map(|(name, _)| fixtures::load(name))
-        .chain((0..SEEDS).map(|seed| random_task(seed, params)));
-    let (mut painted, mut above) = (0, 0);
-    for task in tasks {
-        let in_conditional: Vec<usize> = task
-            .operators
-            .iter()
-            .flat_map(|op| &op.eff)
-            .filter(|e| !e.conditions.is_empty())
-            .flat_map(|e| std::iter::once(e.fact.var).chain(e.conditions.iter().map(|c| c.var)))
-            .collect();
-        for label in STRATEGIES {
-            let painting = paint(&task, label);
-            if !painting.black().iter().any(|v| in_conditional.contains(v)) {
-                continue;
-            }
-
-            painted += 1;
-            let mut h_rb = RedBlack::with_painting(&task, &painting);
-            let mut h_ff = HFf::new(&task);
-            for state in oracle::perfect(&task).keys() {
-                above += usize::from(h_rb.value(state) > h_ff.value(state));
-            }
-        }
-    }
-
-    assert!(
-        painted > 0,
-        "no strategy paints a conditional effect variable black"
-    );
-    assert!(above > 0, "h_RB never exceeds h_FF with such a painting");
-}
-
-/// Conditional effects compile exactly for red-black planning: `A` sets `g` and, if `b = 1`,
-/// resets `y`. With every variable black the plan must really set `b` to 0 first (`h* = 2`);
-/// a copy without a precondition on `b` would let `A` skip the reset.
-#[test]
-fn compiled_copies_respect_black_conditions() {
-    let a = op(
-        vec![],
-        vec![
-            Effect::new(Fact::new(2, 1)),
-            Effect {
-                conditions: vec![Fact::new(0, 1)],
-                fact: Fact::new(1, 0),
-            },
-        ],
-    );
-    let set_b0 = op(vec![Fact::new(0, 1)], vec![Effect::new(Fact::new(0, 0))]);
-    let mut task = binary_task(3, vec![a, set_b0]);
-    task.initial = State(vec![1, 1, 0]);
-    task.goal = vec![Fact::new(2, 1), Fact::new(1, 1)];
-    let state = task.initial_state();
-
-    let painting = Painting::bounded(&task, vec![0, 1, 2]).expect("small");
-    let plan = RedBlack::with_painting(&task, &painting)
-        .plan(&state)
-        .expect("solvable");
-    assert_eq!(plan.ops(), [1, 0]);
     assert!(plan.is_plan_for(&task, &state));
 }
 

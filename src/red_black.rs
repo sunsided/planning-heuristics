@@ -407,3 +407,97 @@ impl Heuristic<State> for RedBlack<'_> {
             .map(|v| u32::try_from(v).unwrap_or(u32::MAX))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    //! Black variables of conditional effects, measured against the compiled task.
+
+    use alloc::vec::Vec;
+
+    use sas_plus::Task;
+    use sas_plus::fdr::SasFile;
+    use sas_plus::random::{RandomTaskParams, random_task};
+
+    use super::{CausalLevel, Fragment, Painting, RedBlack, in_conditional_effect, painting};
+    use crate::HFf;
+
+    /// The test fixtures with conditional effects.
+    const FIXTURES: [&str; 3] = [
+        include_str!("../tests/fixtures/conditional-effects/output.sas"),
+        include_str!("../tests/fixtures/translated-courier/output.sas"),
+        include_str!("../tests/fixtures/translated-wiring/output.sas"),
+    ];
+
+    /// The strategy paintings of `task`.
+    fn paintings(task: &Task) -> Vec<Painting> {
+        let mut all = alloc::vec![Painting::greedy(task), Painting::greedy_dag(task)];
+        for fragment in [Fragment::Arcless, Fragment::Dag] {
+            for level in [CausalLevel::Top, CausalLevel::Bottom] {
+                all.push(Painting::causal_graph_level(task, level, fragment));
+            }
+            all.push(Painting::incident_arcs(task, fragment));
+            all.push(Painting::conflict_directed(
+                task,
+                &task.initial_state(),
+                fragment,
+            ));
+        }
+
+        all
+    }
+
+    /// Non-vacuity: the strategies paint variables of conditional effects black, and then
+    /// the repaired plan costs more than the relaxed plan of the compiled task it repairs
+    /// somewhere, so the black moves matter (not only the compilation).
+    #[test]
+    fn conditional_effect_variables_matter_when_black() {
+        let params = RandomTaskParams {
+            max_conditions: 2,
+            ..RandomTaskParams::default()
+        };
+        let tasks = FIXTURES
+            .iter()
+            .map(|text| SasFile::parse(text).expect("fixture parses").to_task())
+            .chain((0..32).map(|seed| random_task(seed, params)));
+        let (mut painted, mut above) = (0, 0);
+        for task in tasks {
+            let Some(split) = painting::split(&task) else {
+                continue;
+            };
+            let mut h_ff = HFf::new(&split.task);
+            for painting in paintings(&task) {
+                if !in_conditional_effect(&task, painting.black()) {
+                    continue;
+                }
+
+                painted += 1;
+                let mut h_rb = RedBlack::with_painting(&task, &painting);
+                let mut stack = alloc::vec![task.initial_state()];
+                let mut seen = alloc::collections::BTreeSet::from([task.initial_state().0]);
+                while let Some(state) = stack.pop() {
+                    if let Some(plan) = h_rb.plan(&state) {
+                        let ff = h_ff.value(&state).expect("same dead ends");
+                        assert!(plan.cost() >= ff || !plan.is_repaired());
+                        above += usize::from(plan.is_repaired() && plan.cost() > ff);
+                    }
+
+                    for op in task.applicable_operators(&state) {
+                        let next = task.apply(op, &state);
+                        if seen.len() < 2048 && seen.insert(next.0.clone()) {
+                            stack.push(next);
+                        }
+                    }
+                }
+            }
+        }
+
+        assert!(
+            painted > 0,
+            "no strategy paints a conditional effect variable black"
+        );
+        assert!(
+            above > 0,
+            "black conditional effect variables never raise h_RB"
+        );
+    }
+}
