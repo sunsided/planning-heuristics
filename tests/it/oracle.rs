@@ -141,8 +141,17 @@ fn rules(task: &Task) -> Vec<(Vec<Fact>, Fact, u64)> {
         .axioms
         .iter()
         .map(|a| (a.conditions.clone(), a.head, 0));
+    // A rule whose conditions contradict each other never fires in a real state.
+    let consistent = |facts: &[Fact]| {
+        facts
+            .iter()
+            .all(|f| facts.iter().all(|g| g.var != f.var || g.value == f.value))
+    };
 
-    effects.chain(axioms).collect()
+    effects
+        .chain(axioms)
+        .filter(|(conditions, _, _)| consistent(conditions))
+        .collect()
 }
 
 /// Combines the costs of `facts`; `None` if one has no cost. Duplicates count once.

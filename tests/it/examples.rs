@@ -28,6 +28,33 @@ fn op(eff: Vec<Effect>, cost: u32) -> Operator {
     }
 }
 
+/// An effect conditioned on `v0 = 1` of an operator that requires `v0 = 0` never fires, so
+/// the goal it would reach is a dead end, although the relaxation reaches both values of `v0`.
+#[test]
+fn effect_contradicting_its_precondition_never_fires() {
+    let set_b_if_a = Effect {
+        conditions: vec![Fact::new(0, 1)],
+        fact: Fact::new(1, 1),
+    };
+    let task = binary_task(
+        2,
+        vec![
+            Operator {
+                pre: vec![Fact::new(0, 0)],
+                ..op(vec![set_b_if_a], 1)
+            },
+            op(vec![Effect::new(Fact::new(0, 1))], 1),
+        ],
+        vec![Fact::new(1, 1)],
+    );
+    let state = task.initial_state();
+
+    assert_eq!(HMax::new(&task).value(&state), None);
+    assert_eq!(HAdd::new(&task).value(&state), None);
+    assert_eq!(HFf::new(&task).value(&state), None);
+    check_task("contradicting effect", &task);
+}
+
 /// An operator whose conditional effect needs its own unconditional effect is applied twice
 /// in the relaxed plan: `h_FF = 2`, not 1, which would undercut `h_max = 2`.
 #[test]

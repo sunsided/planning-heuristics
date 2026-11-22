@@ -92,6 +92,9 @@ unconditional rather than behind a default feature: the crate has no use without
   deduplicated, so condition counters count each fact once), head = effect fact, cost = operator
   cost; rules grouped by operator;
 - one rule per axiom: conditions = axiom body, head = axiom head, cost 0;
+- no rule for an effect or axiom whose conditions name two values of one variable (a
+  conditional effect contradicting its own precondition can never fire); in the relaxation
+  both values can be reached, so keeping it would only weaken the estimates;
 - for every fact, the list of rules that have it as a condition (watchers);
 - the goal facts (deduplicated).
 
@@ -189,9 +192,6 @@ default the relaxation would report false dead ends and `h_max <= h*` would fail
 
 States passed to the heuristics must have their derived variables evaluated (as produced by
 `Task::initial_state` and `Task::apply`).
-
-Not done: dropping rules whose conditions name two values of one variable (a conditional effect
-contradicting its own precondition can never fire). Keeping them is sound, only weaker.
 
 ### Conditional effects
 
@@ -508,14 +508,18 @@ h_add`, the relaxed plan costs `h_FF`, goal states are 0, and LM-cut is at least
 Comparison with width-search (`tests/it/width_search.rs`): `h_add` against
 `width_search::sas::SasProblem::h_add` on every reachable state of the fixtures and of random
 tasks (plain, conditional effects, conditional effects plus axioms). The values are equal on
-tasks without axioms and without effect conditions that repeat a precondition fact. Elsewhere
-ours is at most theirs wherever both are finite, for two known reasons:
+tasks without axioms and without effect conditions that repeat or contradict a precondition
+fact. Without contradicting effects, ours is at most theirs wherever both are finite, for two
+known reasons:
 
 - with axioms, width-search does not treat derived defaults as free, so it can report a dead
   end or a higher cost where the default only holds after an operator;
 - width-search does not deduplicate a rule's conditions, so a fact that is both a precondition
   and an effect condition is summed twice (e.g. random task seed 31 with `max_conditions: 2`:
   ours 13, theirs 15). Ours counts it once, which is the standard `h_add`.
+
+An effect whose conditions contradict each other or the preconditions never fires: ours has no
+rule for it, width-search keeps it, so on such tasks ours can be higher or a dead end.
 
 The dev-dependency is
 

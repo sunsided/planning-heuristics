@@ -231,7 +231,7 @@ mod tests {
     #[test]
     fn raw_optimum_between_uniform_and_h_star() {
         let mut better = 0;
-        for seed in 0..32 {
+        for seed in 0..64 {
             let params = RandomTaskParams {
                 max_conditions: 1,
                 ..RandomTaskParams::default()

@@ -105,12 +105,17 @@ impl Relaxation {
 
         let (mut rules, op_rules) = operator_rules(task, &id);
         let first_axiom = rules.len();
-        rules.extend(task.axioms.iter().map(|a| Rule {
-            conditions: sorted_ids(a.conditions.iter().map(id)),
-            head: id(&a.head),
-            op: None,
-            cost: 0,
-        }));
+        rules.extend(
+            task.axioms
+                .iter()
+                .filter(|a| consistent(&a.conditions))
+                .map(|a| Rule {
+                    conditions: sorted_ids(a.conditions.iter().map(id)),
+                    head: id(&a.head),
+                    op: None,
+                    cost: 0,
+                }),
+        );
 
         let free = (0..task.num_variables())
             .filter(|&var| task.variables[var].is_derived())
@@ -257,22 +262,40 @@ fn fact_offsets(task: &Task) -> Vec<u32> {
         .collect()
 }
 
-/// One rule per operator effect, grouped by operator, with each operator's rule range.
+/// One rule per operator effect that can fire, grouped by operator, with each operator's
+/// rule range. An effect whose conditions contradict each other or the operator's
+/// preconditions never fires, so it gets no rule.
 fn operator_rules(task: &Task, id: &impl Fn(&Fact) -> usize) -> (Vec<Rule>, Vec<Range<usize>>) {
     let mut rules = Vec::new();
     let mut ranges = Vec::with_capacity(task.operators.len());
+    let mut facts = Vec::new();
     for (op, operator) in task.operators.iter().enumerate() {
         let start = rules.len();
-        rules.extend(operator.eff.iter().map(|e| Rule {
-            conditions: sorted_ids(operator.pre.iter().chain(&e.conditions).map(id)),
-            head: id(&e.fact),
-            op: Some(op),
-            cost: u64::from(operator.cost),
-        }));
+        for e in &operator.eff {
+            facts.clear();
+            facts.extend(operator.pre.iter().chain(&e.conditions).copied());
+            if consistent(&facts) {
+                rules.push(Rule {
+                    conditions: sorted_ids(facts.iter().map(id)),
+                    head: id(&e.fact),
+                    op: Some(op),
+                    cost: u64::from(operator.cost),
+                });
+            }
+        }
         ranges.push(start..rules.len());
     }
 
     (rules, ranges)
+}
+
+/// Whether `facts` can hold together: no variable takes two different values.
+fn consistent(facts: &[Fact]) -> bool {
+    facts.iter().enumerate().all(|(i, f)| {
+        facts[i + 1..]
+            .iter()
+            .all(|g| g.var != f.var || g.value == f.value)
+    })
 }
 
 /// The ids sorted ascending without duplicates, so that condition counters count each
