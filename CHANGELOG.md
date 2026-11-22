@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0](https://github.com/sunsided/planning-heuristics/compare/v0.1.0...v0.2.0) - 2026-11-22
+
+### Added
+
+- Allow black variables with conditional effects in red-black
+- Add an optimal cost partitioning landmark tracker
+- Support axioms in h²
+- Add preferred operators to h_FF
+
+### Changed
+
+- Check compiled red-black paintings against the compiled task
+- Reject oversized exact contexts before building them
+- Compile conditional effects exactly for red-black planning
+- Read derived effect conditions red-black in the real state
+- Make executable black moves an option
+- Prefer black moves whose red conditions hold under real semantics
+- Keep two values of a derived variable mutex in h²
+- Skip effects and axioms that can never fire in the relaxation
+
+### Removed
+
+- Remove H2Error::Axioms
+
 ## [0.1.0](https://github.com/sunsided/planning-heuristics/releases/tag/v0.1.0) - 2026-11-22
 
 ### Added
