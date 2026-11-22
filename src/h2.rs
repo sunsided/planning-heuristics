@@ -17,9 +17,6 @@ const MAX_CONTEXTS: usize = 1024;
 /// Why [`H2::new`] cannot handle a task.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum H2Error {
-    /// The task has axioms. No longer returned: [`H2::new`] supports axioms.
-    #[deprecated(note = "H2::new supports axioms and never returns this")]
-    Axioms,
     /// Operator `0` has more than 1024 effect contexts, too many to compile its conditional
     /// effects away.
     TooManyContexts(usize),
@@ -28,8 +25,6 @@ pub enum H2Error {
 impl fmt::Display for H2Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
-            #[expect(deprecated, reason = "the variant still exists and must display")]
-            Self::Axioms => write!(f, "h2 does not support axioms"),
             Self::TooManyContexts(op) => {
                 write!(f, "operator {op} has too many conditional effect contexts")
             }
