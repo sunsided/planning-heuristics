@@ -1,7 +1,7 @@
 [package]
 name = "planning-heuristics"
 description = "Heuristics for classical planning: delete relaxation (h_max, h_add, h_FF), red-black, landmarks, LM-cut, operator counting and abstraction adapters"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.86"
 authors = ["Markus Mayer <widemeadows@gmail.com>"]
