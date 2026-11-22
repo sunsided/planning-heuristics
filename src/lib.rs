@@ -26,7 +26,9 @@
 //!   natural, greedy-necessary and reasonable orderings ([`OrderingKind`]).
 //! - [`PathHeuristic`]: path-dependent heuristics; [`LandmarkTracker`] tracks the accepted
 //!   landmarks along the search path, as LAMA's landmark count or admissibly with uniform cost
-//!   partitioning.
+//!   partitioning; with feature `lp`, `OptimalLandmarkTracker` with optimal cost partitioning.
+//!   The optimal cost partitioning over LM-cut's action landmarks is `OperatorCounting` with
+//!   only the LM-cut constraints (its LP dual).
 //! - [`LmCut`]: the landmark-cut heuristic `h_LM-cut` (Helmert & Domshlak 2009), admissible,
 //!   with its disjunctive [`ActionLandmark`]s.
 //! - [`AbstractionHeuristic`]: goal distances of any [`sas_plus::Abstraction`], such as a
@@ -99,12 +101,12 @@ pub use additive_max::AdditiveHMax;
 pub use delete_relaxation::{HAdd, HFf, HMax};
 pub use h2::{H2, H2Error};
 pub use intention::{GoalIntention, IntentionKind, IntentionParams, IntentionTracker, Observation};
-#[cfg(feature = "lp")]
-pub use landmarks::OptimalLandmarkCost;
 pub use landmarks::{
     AcceptedLandmarks, LandmarkCount, LandmarkGraph, LandmarkOrdering, LandmarkTracker,
     OrderedLandmarks, OrderingKind, TrackingMode, UniformLandmarkCost,
 };
+#[cfg(feature = "lp")]
+pub use landmarks::{OptimalLandmarkCost, OptimalLandmarkTracker};
 pub use lm_cut::{ActionLandmark, LmCut};
 #[cfg(feature = "lp")]
 pub use operator_counting::{CountingConstraints, OperatorCounting};

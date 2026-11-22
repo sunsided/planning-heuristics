@@ -120,9 +120,10 @@ fn plan_to(parent: &HashMap<State, Option<(State, OpId)>>, mut state: State) -> 
     plan
 }
 
-/// Checks both tracking modes on `task`. Returns whether the admissible tracker was
-/// informative somewhere (an estimate above 0).
-fn check_task(name: &str, task: &Task) -> bool {
+/// Checks both tracking modes on `task`, and with feature `lp` the optimal tracker, adding to
+/// `optimal_above` how often it beat the uniform one. Returns whether the admissible tracker
+/// was informative somewhere (an estimate above 0).
+fn check_task(name: &str, task: &Task, optimal_above: &mut usize) -> bool {
     let perfect = oracle::perfect(task);
     let h_star = perfect[&task.initial_state()];
     let Some(mut admissible) = LandmarkTracker::for_task(task, TrackingMode::UniformCost) else {
@@ -144,6 +145,13 @@ fn check_task(name: &str, task: &Task) -> bool {
     });
     assert_eq!(found, h_star, "{name}: A* with the admissible tracker");
 
+    #[cfg(feature = "lp")]
+    {
+        *optimal_above += check_optimal(name, task, &perfect);
+    }
+    #[cfg(not(feature = "lp"))]
+    let _ = optimal_above;
+
     let mut lama = LandmarkTracker::for_task(task, TrackingMode::Count).expect("same landmarks");
     let plan = gbfs(task, &mut lama);
     assert_eq!(
@@ -156,6 +164,84 @@ fn check_task(name: &str, task: &Task) -> bool {
     }
 
     informative
+}
+
+/// The optimal tracker beside the uniform one: every estimate is at least the uniform one on
+/// the same path information.
+#[cfg(feature = "lp")]
+struct Both {
+    /// The tracker under test, which drives the search.
+    optimal: planning_heuristics::OptimalLandmarkTracker<'static>,
+    /// The uniform tracker, fed the same path information.
+    uniform: LandmarkTracker<'static>,
+    /// How many estimates the optimal tracker was strictly above the uniform one.
+    above: usize,
+}
+
+#[cfg(feature = "lp")]
+impl PathHeuristic<State, OpId> for Both {
+    type Info = planning_heuristics::AcceptedLandmarks;
+
+    fn root(&mut self, state: &State) -> Self::Info {
+        let info = self.optimal.root(state);
+        assert_eq!(info, self.uniform.root(state), "same acceptance");
+        info
+    }
+
+    fn on_expand(
+        &mut self,
+        parent: &State,
+        info: &Self::Info,
+        op: OpId,
+        child: &State,
+    ) -> Self::Info {
+        self.optimal.on_expand(parent, info, op, child)
+    }
+
+    fn merge(&mut self, kept: &mut Self::Info, other: &Self::Info) {
+        self.optimal.merge(kept, other);
+    }
+
+    fn estimate(&mut self, state: &State, info: &Self::Info) -> Option<u32> {
+        let optimal = self.optimal.estimate(state, info);
+        let uniform = self.uniform.estimate(state, info);
+        assert_eq!(
+            optimal.is_none(),
+            uniform.is_none(),
+            "same dead ends at {:?}",
+            state.0
+        );
+        if let (Some(o), Some(u)) = (optimal, uniform) {
+            assert!(o >= u, "optimal {o} < uniform {u} at {:?}", state.0);
+            self.above += usize::from(o > u);
+        }
+        optimal
+    }
+}
+
+/// A* with the optimal tracker finds an optimal plan, never overestimates, and is never below
+/// the uniform tracker. Returns how many estimates beat the uniform tracker.
+#[cfg(feature = "lp")]
+fn check_optimal(name: &str, task: &Task, perfect: &HashMap<State, Option<u64>>) -> usize {
+    let h_star = perfect[&task.initial_state()];
+    let mut both = Both {
+        optimal: planning_heuristics::OptimalLandmarkTracker::for_task(task)
+            .expect("same landmarks"),
+        uniform: LandmarkTracker::for_task(task, TrackingMode::UniformCost)
+            .expect("same landmarks"),
+        above: 0,
+    };
+    let found = astar(task, &mut both, |state, estimate| {
+        if let (Some(e), Some(t)) = (estimate, perfect[state]) {
+            assert!(
+                u64::from(e) <= t,
+                "{name}: optimal {e} > h* {t} at {:?}",
+                state.0
+            );
+        }
+    });
+    assert_eq!(found, h_star, "{name}: A* with the optimal tracker");
+    both.above
 }
 
 /// The state after applying `plan` from the initial state.
@@ -204,18 +290,28 @@ fn tracking_in_reference_searches() {
         ),
     ];
     let mut informative = 0;
+    let mut optimal_above = 0;
     for (label, params) in kinds {
         for seed in 0..SEEDS {
             let name = format!("{label}, seed {seed}");
-            informative += usize::from(check_task(&name, &random_task(seed, params)));
+            informative += usize::from(check_task(
+                &name,
+                &random_task(seed, params),
+                &mut optimal_above,
+            ));
         }
     }
 
     for (name, _) in fixtures::FIXTURES {
-        informative += usize::from(check_task(name, &fixtures::load(name)));
+        informative += usize::from(check_task(name, &fixtures::load(name), &mut optimal_above));
     }
 
     assert!(informative > 0, "the admissible tracker is never above 0");
+    #[cfg(feature = "lp")]
+    assert!(
+        optimal_above > 0,
+        "the optimal tracker never beats the uniform one"
+    );
 }
 
 /// The reference A* itself is optimal with a stateless admissible heuristic.

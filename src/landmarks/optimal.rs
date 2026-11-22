@@ -6,7 +6,11 @@ use microlp::{ComparisonOp, OptimizationDirection, Problem, SolveOutcome, Variab
 use sas_plus::{OpId, State, Task};
 
 use super::heuristics::{round_up_admissible, saturate, to_f64};
-use crate::{Heuristic, Relaxation, UniformLandmarkCost};
+use super::ordered::OrderedLandmarks;
+use super::tracking::AcceptedLandmarks;
+use crate::{
+    Heuristic, LandmarkTracker, PathHeuristic, Relaxation, TrackingMode, UniformLandmarkCost,
+};
 
 /// An admissible landmark heuristic: the optimal cost partitioning over the fact landmarks
 /// (Karpas & Domshlak 2009), solved as a linear program. Feature `lp`.
@@ -108,7 +112,11 @@ impl<'r> OptimalLandmarkCost<'r> {
             .pending_landmarks()
             .filter(|&l| !self.uniform.achievers[l].is_empty())
             .collect();
-        let rows = operator_rows(&self.uniform, &landmarks);
+        let rows = operator_rows(
+            &self.uniform.achievers,
+            self.uniform.costs.len(),
+            &landmarks,
+        );
         let optimum = solve(&landmarks, &rows, &self.uniform.costs).map(round_up_admissible);
 
         Some((uniform, optimum))
@@ -121,16 +129,17 @@ impl Heuristic<State> for OptimalLandmarkCost<'_> {
     }
 }
 
-/// For each operator that achieves one of `landmarks`, the indices into `landmarks` it
-/// achieves, ascending.
+/// For each of the `num_ops` operators that achieves one of `landmarks` (indices into
+/// `achievers`), the indices into `landmarks` it achieves, ascending.
 fn operator_rows(
-    uniform: &UniformLandmarkCost<'_>,
+    achievers: &[Vec<OpId>],
+    num_ops: usize,
     landmarks: &[usize],
 ) -> Vec<(OpId, Vec<usize>)> {
     let mut rows: Vec<(OpId, Vec<usize>)> = Vec::new();
-    let mut row_of = alloc::vec![usize::MAX; uniform.costs.len()];
+    let mut row_of = alloc::vec![usize::MAX; num_ops];
     for (i, &l) in landmarks.iter().enumerate() {
-        for &op in &uniform.achievers[l] {
+        for &op in &achievers[l] {
             if row_of[op] == usize::MAX {
                 row_of[op] = rows.len();
                 rows.push((op, Vec::new()));
@@ -141,6 +150,120 @@ fn operator_rows(
     }
 
     rows
+}
+
+/// The optimal cost partitioning over the landmarks a search path still has to achieve
+/// (Karpas & Domshlak 2009), as a [`PathHeuristic`]. Feature `lp`.
+///
+/// Tracks landmarks like [`LandmarkTracker`] in [`TrackingMode::UniformCost`]: same
+/// acceptance, same required-again rule, same merge by intersection, same dead ends. Instead
+/// of the uniform partitioning it solves the LP of [`OptimalLandmarkCost`] over the landmarks
+/// still to achieve. Each of them is false in the state and must be made true by a future
+/// operator, so the optimum never exceeds the cost of the rest of any plan. The result is
+/// made feasible and rounded like [`OptimalLandmarkCost`], then maxed with the uniform
+/// estimate, so it is at least [`LandmarkTracker`]'s.
+///
+/// # Examples
+///
+/// ```
+/// use planning_heuristics::{
+///     LandmarkTracker, OptimalLandmarkTracker, PathHeuristic, TrackingMode,
+/// };
+/// use sas_plus::{Effect, Fact, Operator, State, Task, Variable};
+///
+/// // As for `OptimalLandmarkCost`: uniform gives 3, the optimal partitioning 4 = h*.
+/// let op = |name: &str, vars: &[usize]| Operator {
+///     name: name.into(),
+///     pre: vec![],
+///     eff: vars.iter().map(|&v| Effect::new(Fact::new(v, 1))).collect(),
+///     cost: 2,
+/// };
+/// let task = Task {
+///     variables: vec![Variable::new("a", 2), Variable::new("b", 2), Variable::new("c", 2)],
+///     operators: vec![op("x", &[0, 1]), op("y", &[1, 2]), op("z", &[2])],
+///     initial: State(vec![0, 0, 0]),
+///     goal: vec![Fact::new(0, 1), Fact::new(1, 1), Fact::new(2, 1)],
+///     axioms: vec![],
+/// };
+/// let start = task.initial_state();
+///
+/// let mut uniform = LandmarkTracker::for_task(&task, TrackingMode::UniformCost).unwrap();
+/// let root = uniform.root(&start);
+/// assert_eq!(uniform.estimate(&start, &root), Some(3));
+/// let mut optimal = OptimalLandmarkTracker::for_task(&task).unwrap();
+/// let root = optimal.root(&start);
+/// assert_eq!(optimal.estimate(&start, &root), Some(4));
+/// ```
+#[derive(Clone, Debug)]
+pub struct OptimalLandmarkTracker<'r> {
+    /// The tracker in [`TrackingMode::UniformCost`]: its acceptance and pending landmarks are
+    /// reused, and its estimate is the floor of this one.
+    uniform: LandmarkTracker<'r>,
+}
+
+impl OptimalLandmarkTracker<'static> {
+    /// A tracker for searches from the initial state of `task`, with its RHW landmarks plus
+    /// reasonable orderings; `None` if the initial state is a dead end.
+    #[must_use]
+    pub fn for_task(task: &Task) -> Option<Self> {
+        Some(Self {
+            uniform: LandmarkTracker::for_task(task, TrackingMode::UniformCost)?,
+        })
+    }
+}
+
+impl<'r> OptimalLandmarkTracker<'r> {
+    /// A tracker over a shared `relaxation` with the landmark `graph` of the search's start
+    /// state.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a landmark names a fact the relaxation does not have.
+    #[must_use]
+    pub fn new(relaxation: &'r Relaxation, graph: &OrderedLandmarks) -> Self {
+        Self {
+            uniform: LandmarkTracker::new(relaxation, graph, TrackingMode::UniformCost),
+        }
+    }
+}
+
+impl PathHeuristic<State, OpId, u32> for OptimalLandmarkTracker<'_> {
+    type Info = AcceptedLandmarks;
+
+    fn root(&mut self, state: &State) -> AcceptedLandmarks {
+        self.uniform.root(state)
+    }
+
+    fn on_expand(
+        &mut self,
+        parent: &State,
+        parent_info: &AcceptedLandmarks,
+        op: OpId,
+        child: &State,
+    ) -> AcceptedLandmarks {
+        self.uniform.on_expand(parent, parent_info, op, child)
+    }
+
+    fn merge(&mut self, kept: &mut AcceptedLandmarks, other: &AcceptedLandmarks) {
+        self.uniform.merge(kept, other);
+    }
+
+    fn estimate(&mut self, state: &State, info: &AcceptedLandmarks) -> Option<u32> {
+        // Fills the pending landmarks and proves the dead ends.
+        let uniform = self.uniform.estimate(state, info)?;
+        let t = &self.uniform;
+        // Landmarks an axiom can add may come for free: worth 0, as in the uniform estimate.
+        let landmarks: Vec<usize> = t
+            .pending
+            .iter()
+            .copied()
+            .filter(|&l| !t.by_axiom[l] && !t.achievers[l].is_empty())
+            .collect();
+        let rows = operator_rows(&t.achievers, t.costs.len(), &landmarks);
+        let optimum = solve(&landmarks, &rows, &t.costs).map_or(0, round_up_admissible);
+
+        Some(saturate(optimum).max(uniform))
+    }
 }
 
 /// Solves the partitioning LP; returns a sum of landmark costs that satisfies every operator

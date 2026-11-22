@@ -21,7 +21,7 @@ use crate::Relaxation;
 pub use heuristics::{LandmarkCount, UniformLandmarkCost};
 use labels::Labels;
 #[cfg(feature = "lp")]
-pub use optimal::OptimalLandmarkCost;
+pub use optimal::{OptimalLandmarkCost, OptimalLandmarkTracker};
 pub use ordered::{LandmarkOrdering, OrderedLandmarks, OrderingKind};
 pub use tracking::{AcceptedLandmarks, LandmarkTracker, TrackingMode};
 
