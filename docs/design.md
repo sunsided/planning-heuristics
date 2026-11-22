@@ -365,8 +365,18 @@ red facts following find the optimal plan where repair over-estimates.
   as constraints (Pommerening, Röger, Helmert & Bonet 2014); infeasible means dead end, the
   optimum is rounded up after a `1e-6` tolerance and floored at LM-cut. Tests: `<= h*`, only
   real dead ends, at least LM-cut, the combination at least each part.
-- Open: optimal partitioning over action landmarks (LM-cut's cuts) or the tracked
-  landmarks, `PathHeuristic` in `search-core`.
+- Done: optimal partitioning over action landmarks (LM-cut's cuts) is `OperatorCounting`
+  with only the LM-cut constraints: its LP `min Σ cost(o) Y_o, Σ_{o ∈ L} Y_o ≥ 1` is the dual
+  of `max Σ c_L, Σ_{L ∋ o} c_L ≤ cost(o)`, so the optimum is the same. Tested at least
+  LM-cut and at most `h*` (`tests/it/operator_counting.rs`).
+- Done: `OptimalLandmarkTracker` (feature `lp`): the tracked landmarks of
+  `TrackingMode::UniformCost` with the `OptimalLandmarkCost` LP instead of the uniform
+  partitioning, maxed with it. A separate type, not a `TrackingMode` variant, so the
+  exhaustive enum keeps its variants. Tests: A* with it finds optimal plans, estimates stay
+  `<= h*` and never below the uniform tracker on the same path information, and beat it
+  somewhere.
+- Open: `PathHeuristic` belongs in `search-core` beside `Heuristic`; it moves there once
+  search-core takes it.
 
 ## Relevance score (done)
 

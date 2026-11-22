@@ -106,7 +106,8 @@ assert_eq!(h_ff.value(&state), Some(3_u64));
   and uniform landmark cost partitioning (admissible); optimal landmark cost partitioning by
   LP (feature `lp`)
 - LAMA-style landmark tracking along the search path (`PathHeuristic`, `LandmarkTracker`),
-  inadmissible count or admissible uniform cost partitioning
+  inadmissible count, admissible uniform cost partitioning, or optimal cost partitioning
+  (`OptimalLandmarkTracker`, feature `lp`)
 - LM-cut (`h_LM-cut`), admissible, with axioms, and conditional effects by context splitting;
   also from seeded start costs per fact and per-call operator costs (`LmCut::value_seeded`)
 - The relevance score `h_Ξ` (Kim & Sridharan 2024), landmark-like and inadmissible, over a
@@ -130,7 +131,8 @@ these heuristics plug into every search crate built on it.
   in `Adapter` to get a `Heuristic`.
 - `cost-partition`: the same for `cost_partition::CostPartitionedHeuristic` and
   `MaxOverOrders`.
-- `lp`: `OptimalLandmarkCost`, the optimal landmark cost partitioning, and
+- `lp`: `OptimalLandmarkCost` and `OptimalLandmarkTracker`, the optimal landmark cost
+  partitioning per state and along the search path, and
   `OperatorCounting`, the state equation with LM-cut constraints, solved with the
   pure-Rust `microlp`. It needs `std`.
 

@@ -129,15 +129,15 @@ pub struct LandmarkTracker<'r> {
     /// Whether each landmark is a single goal fact.
     goal: Vec<bool>,
     /// Per landmark, whether an axiom can add one of its facts.
-    by_axiom: Vec<bool>,
+    pub(super) by_axiom: Vec<bool>,
     /// Per landmark, the operators that add one of its facts, ascending.
-    achievers: Vec<Vec<OpId>>,
+    pub(super) achievers: Vec<Vec<OpId>>,
     /// The cost of each operator.
-    costs: Vec<u64>,
+    pub(super) costs: Vec<u64>,
     /// Per operator, the number of pending landmarks it adds in the current estimate.
     shares: Vec<u32>,
     /// The pending landmarks of the current estimate.
-    pending: Vec<usize>,
+    pub(super) pending: Vec<usize>,
 }
 
 impl LandmarkTracker<'static> {
