@@ -298,9 +298,14 @@ impl H2 {
         changed
     }
 
-    /// `h²` of the pair `{p, q}`; a free fact adds nothing to the other one.
+    /// `h²` of the pair `{p, q}`; [`INF`] for two values of one variable, and otherwise a
+    /// free fact adds nothing to the other one.
     fn pair(&self, p: usize, q: usize) -> u64 {
         let n = self.var_of.len();
+        if p != q && self.var_of[p] == self.var_of[q] {
+            return INF;
+        }
+
         match (self.free[p], self.free[q]) {
             (true, true) => 0,
             (true, false) => self.table[q * n + q],
