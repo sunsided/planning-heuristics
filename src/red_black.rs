@@ -108,8 +108,10 @@ impl RedBlackPlan {
 /// variable. The estimate comes from relaxed plan repair: take the `h_FF` relaxed plan, and
 /// execute it under red-black semantics; before each operator, move every black variable whose
 /// precondition value differs along a cheapest path in its domain transition graph (using only
-/// transitions whose red preconditions already hold), and at the end move the black variables
-/// to their goal values. The cost of the repaired plan is `h_RB`. If a needed path does not
+/// transitions whose red preconditions already hold, and preferring a cheapest path whose red
+/// preconditions also hold when the plan so far is executed under real semantics: choice
+/// point (ii) of Domshlak, Hoffmann & Katz 2015, Section 5.3.2), and at the end move the
+/// black variables to their goal values. The cost of the repaired plan is `h_RB`. If a needed path does not
 /// exist, the repair gives up and the estimate falls back to the relaxed plan cost (`h_FF`);
 /// with RSE-invertible black variables a path always exists (Domshlak, Hoffmann & Katz 2015,
 /// Corollary 1 and Theorem 11), so the fallback only happens outside that fragment or at the
