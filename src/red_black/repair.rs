@@ -178,7 +178,7 @@ impl Repair {
         }
 
         if self.prefer_executable {
-            self.apply_real(tables, op);
+            self.apply_real(relaxation, tables, op);
         }
 
         close_axioms(relaxation, &mut self.holds);
@@ -186,14 +186,22 @@ impl Repair {
         self.cost = self.cost.saturating_add(tables.cost[op]);
     }
 
-    /// Applies `op`'s effects whose conditions hold in [`Repair::real`] to it.
-    fn apply_real(&mut self, tables: &Tables, op: OpId) {
-        let real = &self.real;
+    /// Applies `op`'s effects whose conditions hold in [`Repair::real`] to it; conditions on
+    /// derived variables are read from the red-black state, as in [`Repair::is_active`].
+    fn apply_real(&mut self, relaxation: &Relaxation, tables: &Tables, op: OpId) {
+        let (real, holds) = (&self.real, &self.holds);
+        let holds_real = |c: &sas_plus::Fact| {
+            if tables.derived[c.var] {
+                holds[relaxation.fact_id(*c)]
+            } else {
+                real[c.var] == c.value
+            }
+        };
         self.real_fired.clear();
         self.real_fired.extend(
             tables.real_eff[op]
                 .iter()
-                .filter(|(conditions, _)| conditions.iter().all(|c| real[c.var] == c.value))
+                .filter(|(conditions, _)| conditions.iter().all(holds_real))
                 .map(|&(_, fact)| fact),
         );
         for fact in &self.real_fired {
