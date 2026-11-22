@@ -54,6 +54,14 @@ pub struct RedBlackOptions {
     /// possible; it is a relaxed plan, so `h_RB >= h+` still holds. In the tractable fragment
     /// it always succeeds (their Theorem 13), up to the operator budget of DAG paintings.
     pub follow: bool,
+    /// Prefer FDR-executable black moves (choice point (ii) of Domshlak, Hoffmann & Katz 2015,
+    /// Section 5.3.2), in repair and following alike. Each black move takes a shortest DTG
+    /// path whose red preconditions are also true when the plan so far is executed under real
+    /// semantics, if one exists, and the plain shortest path otherwise. The plan is then more
+    /// often a real plan ([`RedBlackPlan::is_plan_for`], stop search), at the price of longer
+    /// moves and so possibly higher estimates. Their configuration `RDLS` uses it, `RDLS-`
+    /// does not (Table 1).
+    pub prefer_executable: bool,
 }
 
 impl RedBlackPlan {
@@ -108,8 +116,9 @@ impl RedBlackPlan {
 /// variable. The estimate comes from relaxed plan repair: take the `h_FF` relaxed plan, and
 /// execute it under red-black semantics; before each operator, move every black variable whose
 /// precondition value differs along a cheapest path in its domain transition graph (using only
-/// transitions whose red preconditions already hold), and at the end move the black variables
-/// to their goal values. The cost of the repaired plan is `h_RB`. If a needed path does not
+/// transitions whose red preconditions already hold; with
+/// [`RedBlackOptions::prefer_executable`] preferring one whose red preconditions also hold
+/// under real semantics), and at the end move the black variables to their goal values. The cost of the repaired plan is `h_RB`. If a needed path does not
 /// exist, the repair gives up and the estimate falls back to the relaxed plan cost (`h_FF`);
 /// with RSE-invertible black variables a path always exists (Domshlak, Hoffmann & Katz 2015,
 /// Corollary 1 and Theorem 11), so the fallback only happens outside that fragment or at the
@@ -340,6 +349,7 @@ impl<'r> RedBlack<'r> {
             forward::forward(&self.tables, &mut self.relaxed);
         }
 
+        self.repair.prefer_executable = self.options.prefer_executable;
         let repaired = if self.options.follow {
             self.repair
                 .follow(&self.relaxation, &self.tables, state, &self.relaxed)

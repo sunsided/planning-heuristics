@@ -302,29 +302,22 @@ fn assert_each_matters(above: [usize; STRATEGIES.len()]) {
 }
 
 /// The [`RedBlackOptions`] every painting is checked with, by label.
-const VARIANTS: [(&str, RedBlackOptions); 3] = [
-    (
-        "repair",
-        RedBlackOptions {
-            forward: false,
-            follow: false,
-        },
-    ),
-    (
-        "forward",
-        RedBlackOptions {
-            forward: true,
-            follow: false,
-        },
-    ),
-    (
-        "follow",
-        RedBlackOptions {
-            forward: false,
-            follow: true,
-        },
-    ),
+const VARIANTS: [(&str, RedBlackOptions); 5] = [
+    ("repair", options(false, false, false)),
+    ("forward", options(true, false, false)),
+    ("follow", options(false, true, false)),
+    ("repair, executable", options(false, false, true)),
+    ("follow, executable", options(false, true, true)),
 ];
+
+/// The options with `forward`, `follow` and `prefer_executable` set.
+const fn options(forward: bool, follow: bool, prefer_executable: bool) -> RedBlackOptions {
+    RedBlackOptions {
+        forward,
+        follow,
+        prefer_executable,
+    }
+}
 
 /// Checks `h_RB` with `painting` under every entry of [`VARIANTS`]; returns the number of
 /// (variant, state) pairs where the red-black plan costs more than `h_FF`.
@@ -900,4 +893,84 @@ fn following_uses_up_repeated_operators() {
 
     assert!(plan.is_repaired());
     assert_eq!(plan.ops(), [0, 0, 1]);
+}
+
+/// The task of [`black_moves_prefer_paths_with_active_red_conditions`]: truck `T` (variable 0)
+/// with two moves from 2 back to 1, `fast21` (operator 1, needs `r = 1`) and `slow21`
+/// (operator 2).
+fn truck_and_resource_task() -> Task {
+    let op = |name: &str, pre: Vec<Fact>, eff: Fact, cost: u32| Operator {
+        name: name.into(),
+        pre,
+        eff: vec![Effect::new(eff)],
+        cost,
+    };
+    let (truck, res, p_done, x_done, q_done) = (0, 1, 2, 3, 4);
+    Task {
+        variables: vec![
+            Variable::new("T", 3),
+            Variable::new("r", 3),
+            Variable::new("p", 2),
+            Variable::new("x", 2),
+            Variable::new("q", 2),
+        ],
+        operators: vec![
+            op("a12", vec![Fact::new(truck, 1)], Fact::new(truck, 2), 1),
+            op(
+                "fast21",
+                vec![Fact::new(truck, 2), Fact::new(res, 1)],
+                Fact::new(truck, 1),
+                1,
+            ),
+            op("slow21", vec![Fact::new(truck, 2)], Fact::new(truck, 1), 3),
+            op("P", vec![Fact::new(truck, 2)], Fact::new(p_done, 1), 1),
+            op("setR1", vec![Fact::new(res, 0)], Fact::new(res, 1), 1),
+            op("setR2", vec![Fact::new(res, 1)], Fact::new(res, 2), 1),
+            op("X", vec![Fact::new(res, 2)], Fact::new(x_done, 1), 1),
+            op(
+                "Q",
+                vec![Fact::new(truck, 1), Fact::new(x_done, 1)],
+                Fact::new(q_done, 1),
+                1,
+            ),
+        ],
+        initial: State(vec![1, 0, 0, 0, 0]),
+        goal: vec![Fact::new(p_done, 1), Fact::new(q_done, 1)],
+        axioms: vec![],
+    }
+}
+
+/// Choice point (ii) of Domshlak, Hoffmann & Katz (2015, Section 5.3.2): a black move prefers
+/// a shortest path whose red conditions are true under real semantics. The truck `T` must
+/// return from 2 to 1 for `Q`; `fast` needs `r = 1`, which the red-black state still has but
+/// the real state left for `r = 2`, so the repair takes `slow` and the plan is a real plan.
+#[test]
+fn black_moves_prefer_paths_with_active_red_conditions() {
+    let truck = 0;
+    let task = truck_and_resource_task();
+    task.validate().expect("valid");
+    let state = task.initial_state();
+    let painting = Painting::new(&task, vec![truck]).expect("one black variable");
+    let shortest = RedBlack::with_painting(&task, &painting)
+        .plan(&state)
+        .expect("solvable");
+    assert!(
+        shortest.ops().contains(&1),
+        "takes fast21: {:?}",
+        shortest.ops()
+    );
+    assert!(!shortest.is_plan_for(&task, &state));
+    assert_eq!(shortest.cost(), 7);
+
+    let mut h = RedBlack::with_painting(&task, &painting).with_options(RedBlackOptions {
+        prefer_executable: true,
+        ..RedBlackOptions::default()
+    });
+    let plan = h.plan(&state).expect("solvable");
+
+    assert!(plan.is_repaired());
+    assert!(plan.ops().contains(&2), "takes slow21: {:?}", plan.ops());
+    assert!(!plan.ops().contains(&1), "avoids fast21: {:?}", plan.ops());
+    assert!(plan.is_plan_for(&task, &state), "{:?}", plan.ops());
+    assert_eq!(plan.cost(), 9);
 }

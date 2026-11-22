@@ -63,6 +63,13 @@ pub(super) struct Tables {
     /// For each black variable, the fact ids of every value of each red variable an operator
     /// moving it sets: the red facts its moves may delete under real semantics.
     pub side_facts: Vec<Vec<usize>>,
+    /// For each operator, its effects as `(effect conditions, fact)`, for tracking the real
+    /// state of the red-black plan (choice point (ii) of Domshlak, Hoffmann & Katz 2015,
+    /// Section 5.3.2).
+    pub real_eff: Vec<Vec<(Vec<Fact>, Fact)>>,
+    /// Whether each variable is derived; red conditions on derived variables are read from
+    /// the red-black state, not from the real one.
+    pub derived: Vec<bool>,
 }
 
 impl Tables {
@@ -129,6 +136,8 @@ impl Tables {
                 .iter()
                 .map(|op| needs(task, relaxation, op))
                 .collect(),
+            real_eff: real_effects(task),
+            derived: derived(task),
         }
     }
 }
@@ -183,6 +192,27 @@ fn black_effects(task: &Task, black: &[VarId]) -> Vec<Vec<(usize, u32)>> {
                         .ok()
                         .map(|b| (b, e.fact.value))
                 })
+                .collect()
+        })
+        .collect()
+}
+
+/// Whether each variable of `task` is derived.
+fn derived(task: &Task) -> Vec<bool> {
+    task.variables
+        .iter()
+        .map(sas_plus::Variable::is_derived)
+        .collect()
+}
+
+/// For each operator of `task`, its effects as `(effect conditions, fact)`.
+fn real_effects(task: &Task) -> Vec<Vec<(Vec<Fact>, Fact)>> {
+    task.operators
+        .iter()
+        .map(|op| {
+            op.eff
+                .iter()
+                .map(|e| (e.conditions.clone(), e.fact))
                 .collect()
         })
         .collect()

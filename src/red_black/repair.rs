@@ -22,6 +22,15 @@ pub(super) struct Repair {
     /// of Domshlak, Hoffmann & Katz (2015, Figure 4); in red facts following the achievable
     /// values `B` of their Figure 6 (a superset of the visited ones).
     allowed: Vec<bool>,
+    /// The value of each variable when the plan so far is executed under real (FDR)
+    /// semantics, effects applied whether or not preconditions hold; derived variables are
+    /// not evaluated. Decides which red conditions are active for choice point (ii).
+    real: Vec<u32>,
+    /// The effects of one operator application on [`Repair::real`].
+    real_fired: Vec<sas_plus::Fact>,
+    /// Whether black moves prefer paths whose red conditions are active
+    /// ([`crate::RedBlackOptions::prefer_executable`]); [`Repair::real`] is only tracked then.
+    pub prefer_executable: bool,
     /// The red-black plan so far.
     pub plan: Vec<OpId>,
     /// Its cost so far.
@@ -113,6 +122,7 @@ impl Repair {
                 .map(|(&offset, &n)| value_of(&self.holds, offset, n)),
         );
         self.allowed.clone_from(&self.holds);
+        self.real.clone_from(&state.0);
         self.plan.clear();
         self.cost = 0;
         self.steps = 0;
@@ -167,9 +177,36 @@ impl Repair {
             self.holds[head] = true;
         }
 
+        if self.prefer_executable {
+            self.apply_real(relaxation, tables, op);
+        }
+
         close_axioms(relaxation, &mut self.holds);
         self.plan.push(op);
         self.cost = self.cost.saturating_add(tables.cost[op]);
+    }
+
+    /// Applies `op`'s effects whose conditions hold in [`Repair::real`] to it; conditions on
+    /// derived variables are read from the red-black state, as in [`Repair::is_active`].
+    fn apply_real(&mut self, relaxation: &Relaxation, tables: &Tables, op: OpId) {
+        let (real, holds) = (&self.real, &self.holds);
+        let holds_real = |c: &sas_plus::Fact| {
+            if tables.derived[c.var] {
+                holds[relaxation.fact_id(*c)]
+            } else {
+                real[c.var] == c.value
+            }
+        };
+        self.real_fired.clear();
+        self.real_fired.extend(
+            tables.real_eff[op]
+                .iter()
+                .filter(|(conditions, _)| conditions.iter().all(holds_real))
+                .map(|&(_, fact)| fact),
+        );
+        for fact in &self.real_fired {
+            self.real[fact.var] = fact.value;
+        }
     }
 
     /// Moves black variable `b` to `target` along a cheapest path of its domain transition
@@ -188,7 +225,11 @@ impl Repair {
             return Some(());
         }
 
-        self.cheapest_paths(tables, b);
+        // Choice point (ii): a shortest path whose red conditions are all active, if any.
+        self.cheapest_paths(relaxation, tables, b, self.prefer_executable);
+        if self.prefer_executable && self.dist[target as usize].is_none() {
+            self.cheapest_paths(relaxation, tables, b, false);
+        }
         // Taken out: moving ancestors below reuses the buffer.
         let mut path = core::mem::take(&mut self.path);
         path.clear();
@@ -220,13 +261,20 @@ impl Repair {
     }
 
     /// Dijkstra over the values of black variable `b` from its current value, through the
-    /// transitions whose red preconditions hold; fills [`Repair::dist`] and [`Repair::via`].
-    /// Domains are small, so the open value is found by a linear scan.
+    /// transitions whose red preconditions hold (with `active_only`, also under real
+    /// semantics: [`Repair::is_active`]); fills [`Repair::dist`] and [`Repair::via`]. Domains
+    /// are small, so the open value is found by a linear scan.
     ///
     /// With linked black variables only transitions of the projected task `Π^B` count: the
     /// black preconditions and the value reached must be allowed ([`Repair::usable_in_dag`]). Without links there are no black outside conditions and
     /// any value may be reached, as in Katz, Hoffmann & Domshlak (AAAI 2013).
-    fn cheapest_paths(&mut self, tables: &Tables, b: usize) {
+    fn cheapest_paths(
+        &mut self,
+        relaxation: &Relaxation,
+        tables: &Tables,
+        b: usize,
+        active_only: bool,
+    ) {
         let n = tables.domain[b] as usize;
         refill(&mut self.dist, n, None);
         refill(&mut self.via, n, None);
@@ -238,7 +286,9 @@ impl Repair {
             for t in &tables.transitions[b] {
                 let usable = t.from.is_none_or(|from| from as usize == x)
                     && t.to as usize != x
-                    && tables.red_pre[t.op].iter().all(|&f| self.holds[f])
+                    && tables.red_pre[t.op].iter().all(|&f| {
+                        self.holds[f] && (!active_only || self.is_active(relaxation, tables, f))
+                    })
                     && (!tables.linked || self.usable_in_dag(tables, b, t));
                 let next = d.saturating_add(tables.cost[t.op]);
                 let to = t.to as usize;
@@ -248,6 +298,17 @@ impl Repair {
                 }
             }
         }
+    }
+
+    /// Whether the red fact `f` is active (Domshlak, Hoffmann & Katz 2015, Section 5.3.2): true
+    /// when the plan so far is executed under real semantics. A fact of a derived variable
+    /// counts as active if it holds in the red-black state.
+    ///
+    /// shortcut: derived facts are not re-evaluated on the real state; evaluate the axioms
+    /// there if the preference matters on axiom-heavy tasks.
+    fn is_active(&self, relaxation: &Relaxation, tables: &Tables, f: usize) -> bool {
+        let fact = relaxation.fact(f);
+        tables.derived[fact.var] || self.real[fact.var] == fact.value
     }
 
     /// Whether transition `t` of black variable `b` belongs to the projected task `Π^B` of
