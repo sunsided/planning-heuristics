@@ -66,6 +66,11 @@ pub struct Relaxation {
     op_rules: Vec<Range<usize>>,
     /// Index of the first axiom rule; all rules before it belong to operators.
     first_axiom: usize,
+    /// The preconditions of operator `op` are
+    /// `pre_facts[pre_starts[op]..pre_starts[op + 1]]`, for [`Relaxation::is_applicable`].
+    pre_starts: Vec<usize>,
+    /// The concatenated precondition fact ids; see [`Relaxation::pre_starts`].
+    pre_facts: Vec<u32>,
     /// Facts that hold in every relaxed state: the defaults of the derived variables.
     free: Vec<u32>,
     /// The goal facts, sorted ascending without duplicates.
@@ -131,6 +136,13 @@ impl Relaxation {
         let (axiom_watcher_starts, axiom_watcher_axioms) =
             watchers(&rules[first_axiom..], num_facts);
         let (rule_init, unconditioned) = worklist_tables(&rules);
+        let mut pre_starts = Vec::with_capacity(task.operators.len() + 1);
+        let mut pre_facts = Vec::new();
+        pre_starts.push(0);
+        for operator in &task.operators {
+            pre_facts.extend(operator.pre.iter().map(|f| to_u32(id(f))));
+            pre_starts.push(pre_facts.len());
+        }
 
         Self {
             offsets,
@@ -145,6 +157,8 @@ impl Relaxation {
             unconditioned,
             op_rules,
             first_axiom,
+            pre_starts,
+            pre_facts,
             free,
             goal,
             is_goal,
@@ -179,6 +193,23 @@ impl Relaxation {
         let var = self.offsets.partition_point(|&offset| offset <= id) - 1;
 
         Fact::new(var, id - self.offsets[var])
+    }
+
+    /// Whether operator `op`'s preconditions hold in `state` (real, not relaxed, semantics:
+    /// derived variables must be evaluated in `state`).
+    ///
+    /// # Panics
+    ///
+    /// Panics if `op` is not an operator of the task or `state` has fewer values than the task
+    /// has variables.
+    #[must_use]
+    pub fn is_applicable(&self, op: OpId, state: &sas_plus::State) -> bool {
+        self.pre_facts[self.pre_starts[op]..self.pre_starts[op + 1]]
+            .iter()
+            .all(|&f| {
+                let fact = self.fact(f as usize);
+                state.0[fact.var] == fact.value
+            })
     }
 
     /// The fact ids true in `state`, one per variable, in variable order.

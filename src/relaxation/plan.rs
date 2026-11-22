@@ -50,9 +50,34 @@ impl RelaxedPlan {
     pub fn cost(&self) -> u64 {
         self.cost
     }
+
+    /// The preferred operators (Hoffmann & Nebel 2001's helpful actions, Fast Downward's
+    /// preferred operators of `h_FF`): the operators of the plan applicable in `state`, the
+    /// state the plan was extracted from, each once, in plan order.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `relaxation` is not the one the plan came from or `state` has fewer values
+    /// than the task has variables.
+    #[must_use]
+    pub fn preferred_operators(&self, relaxation: &Relaxation, state: &State) -> Vec<OpId> {
+        relaxation.applicable_once(&self.ops, state)
+    }
 }
 
 impl Relaxation {
+    /// The operators of `ops` applicable in `state`, each once, in order.
+    pub(crate) fn applicable_once(&self, ops: &[OpId], state: &State) -> Vec<OpId> {
+        let mut preferred: Vec<OpId> = Vec::new();
+        for &op in ops {
+            if !preferred.contains(&op) && self.is_applicable(op, state) {
+                preferred.push(op);
+            }
+        }
+
+        preferred
+    }
+
     /// Extracts a relaxed plan from `state` from the `h_add` best supporters; `None` if the
     /// goal is unreachable under the relaxation (a dead end).
     ///

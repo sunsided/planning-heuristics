@@ -87,4 +87,28 @@ fn check_relaxed_plan(task: &Task, h_ff: &mut HFf<'_>, state: &State, ff: u64, c
         "invalid relaxed plan, {ctx}"
     );
     assert_eq!(oracle::plan_cost(task, plan.ops()), ff, "plan cost, {ctx}");
+
+    let preferred = h_ff.preferred_operators(state).expect("not a dead end");
+    assert_eq!(
+        preferred,
+        plan.preferred_operators(h_ff.relaxation(), state),
+        "preferred operators, {ctx}"
+    );
+    let applicable: Vec<_> = task.applicable_operators(state).collect();
+    let mut expected: Vec<_> = Vec::new();
+    for &op in plan.ops() {
+        if applicable.contains(&op) && !expected.contains(&op) {
+            expected.push(op);
+        }
+    }
+    assert_eq!(preferred, expected, "preferred operators, {ctx}");
+    // The first operator of the plan needs only start facts; without axioms those are the
+    // state's facts, so it is applicable.
+    if task.axioms.is_empty() && !plan.ops().is_empty() {
+        assert_eq!(
+            preferred.first(),
+            plan.ops().first(),
+            "first operator, {ctx}"
+        );
+    }
 }

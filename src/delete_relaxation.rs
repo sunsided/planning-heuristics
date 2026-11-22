@@ -12,7 +12,9 @@
 
 use alloc::borrow::Cow;
 
-use sas_plus::{State, Task};
+use alloc::vec::Vec;
+
+use sas_plus::{OpId, State, Task};
 
 use crate::relaxation::Workspace;
 use crate::{Combine, Heuristic, Relaxation, RelaxedPlan};
@@ -128,5 +130,16 @@ impl HFf<'_> {
             .relaxed_plan_in(state, &mut self.workspace)?;
 
         Some(RelaxedPlan::new(self.workspace.plan.clone(), cost))
+    }
+
+    /// The preferred operators of `state`: the operators of [`HFf::relaxed_plan`] applicable
+    /// in `state`, each once, in plan order (see [`RelaxedPlan::preferred_operators`]). `None`
+    /// for a dead end; empty in a goal state.
+    #[must_use]
+    pub fn preferred_operators(&mut self, state: &State) -> Option<Vec<OpId>> {
+        self.relaxation
+            .relaxed_plan_in(state, &mut self.workspace)?;
+
+        Some(self.relaxation.applicable_once(&self.workspace.plan, state))
     }
 }

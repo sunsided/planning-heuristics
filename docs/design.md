@@ -178,8 +178,12 @@ tie-breaking. The replay keeps:
 - the plan valid as a relaxed *sequence* (checked in tests), hence `h_max <= h+ <= h_FF`;
 - every appended operator tied to a distinct marked rule, hence `h_FF <= h_add`.
 
-Preferred operators (the plan's operators applicable in the state) fall out of `ops` and are
-not a separate API yet.
+Preferred operators (Hoffmann & Nebel's helpful actions): the plan's operators applicable in
+the state, each once, in plan order (`HFf::preferred_operators`,
+`RelaxedPlan::preferred_operators`). Applicability uses the real state, so a precondition on a
+derived default that the relaxation treats as free must actually hold. Tested against
+`Task::applicable_operators` on every reachable state; without axioms the plan's first operator
+is always preferred.
 
 ### Axioms
 
@@ -454,7 +458,7 @@ regression). It can switch only after it grounds to `sas_plus::Task` (roadmap op
 
 - wrap this crate's types in miniplan's `Heuristic` trait (name + estimate), converting
   `Option<u64>` to `HValue` (`None` → infinity);
-- preferred operators: the `RelaxedPlan::ops` applicable in the state;
+- preferred operators: `HFf::preferred_operators`;
 - backward relaxed costs for regression stay in miniplan until a second user exists;
 - miniplan's `f64` costs must first become fixed-point integers.
 
