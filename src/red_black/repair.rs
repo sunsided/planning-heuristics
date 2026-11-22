@@ -28,6 +28,9 @@ pub(super) struct Repair {
     real: Vec<u32>,
     /// The effects of one operator application on [`Repair::real`].
     real_fired: Vec<sas_plus::Fact>,
+    /// Whether black moves prefer paths whose red conditions are active
+    /// ([`crate::RedBlackOptions::prefer_executable`]); [`Repair::real`] is only tracked then.
+    pub prefer_executable: bool,
     /// The red-black plan so far.
     pub plan: Vec<OpId>,
     /// Its cost so far.
@@ -174,6 +177,17 @@ impl Repair {
             self.holds[head] = true;
         }
 
+        if self.prefer_executable {
+            self.apply_real(tables, op);
+        }
+
+        close_axioms(relaxation, &mut self.holds);
+        self.plan.push(op);
+        self.cost = self.cost.saturating_add(tables.cost[op]);
+    }
+
+    /// Applies `op`'s effects whose conditions hold in [`Repair::real`] to it.
+    fn apply_real(&mut self, tables: &Tables, op: OpId) {
         let real = &self.real;
         self.real_fired.clear();
         self.real_fired.extend(
@@ -185,10 +199,6 @@ impl Repair {
         for fact in &self.real_fired {
             self.real[fact.var] = fact.value;
         }
-
-        close_axioms(relaxation, &mut self.holds);
-        self.plan.push(op);
-        self.cost = self.cost.saturating_add(tables.cost[op]);
     }
 
     /// Moves black variable `b` to `target` along a cheapest path of its domain transition
@@ -208,8 +218,8 @@ impl Repair {
         }
 
         // Choice point (ii): a shortest path whose red conditions are all active, if any.
-        self.cheapest_paths(relaxation, tables, b, true);
-        if self.dist[target as usize].is_none() {
+        self.cheapest_paths(relaxation, tables, b, self.prefer_executable);
+        if self.prefer_executable && self.dist[target as usize].is_none() {
             self.cheapest_paths(relaxation, tables, b, false);
         }
         // Taken out: moving ancestors below reuses the buffer.

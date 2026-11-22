@@ -271,7 +271,9 @@ C). All three were checked against the PDFs.
   (longer plans, worse estimates), and its implementation uses explicit plans as we do.
   Note that the heuristic value is the plan length, which can itself be exponential in the
   number of black variables; a succinct plan would bound the runtime, not the value.
-- Choice point (ii) (AIJ Section 5.3.2), in repair and following: every black move first
+- Choice point (ii) (AIJ Section 5.3.2), in repair and following, with
+  `RedBlackOptions::prefer_executable` (off by default; the paper's `RDLS` uses it, `RDLS-`
+  does not, Table 1): every black move first
   searches a shortest DTG path all of whose red conditions are *active*, true when the plan
   so far is executed under real semantics (`Repair::real`: effects applied whether or not
   preconditions hold, as the paper's "executing the current red-black plan prefix under the
@@ -314,13 +316,13 @@ C). All three were checked against the PDFs.
 | F: move actions without black effects towards the start; stop when the predecessor achieves a precondition (AAAI) | `forward.rs` | matches; effect conditions count as preconditions and an operator needing a derived fact does not move, so the reordered plan stays a relaxed plan |
 | S: stop when the red-black plan is a real plan (AAAI) | `RedBlackPlan::is_plan_for` | matches (the check; the search stops) |
 | Red facts following: `R+ = G[V^R] ∪ ⋃ pre(a)[V^R]`; loop over `A'`; `UPDATE` in topological order; `ACHIEVE` (AIJ Fig. 6) | `repair/follow.rs` | matches; `ACHIEVE` uses the dynamic red facts instead of the explicit inverse-arc set, as Section 5.3.1 does |
-| Choice point (ii): a shortest DTG path whose red outside conditions are all active (true when the plan prefix is executed under FDR semantics), if one exists (AIJ 5.3.2) | `Repair::move_black`, `cheapest_paths(.., active_only)` | matches; derived conditions count as active if they hold red-black |
+| Choice point (ii): a shortest DTG path whose red outside conditions are all active (true when the plan prefix is executed under FDR semantics), if one exists (AIJ 5.3.2) | `RedBlackOptions::prefer_executable`, `Repair::move_black`, `cheapest_paths(.., active_only)` | matches, as an option; derived conditions count as active if they hold red-black |
 | Choice point (i): fewest estimated steps via all-pairs DTG distances, prefer actions whose black moves delete no achieved `R+` fact (AIJ 5.3.2) | `best_candidate` | matches; distances are operator costs, ties to the lowest id |
 | With axioms a derived `R+` fact may have no achieving action | apply the first achievable unapplied relaxed plan action, capped at `|R+| + |relaxed plan|` steps | our extension (the paper has no axioms); bug fixed (8c501c8): a repeated relaxed plan operator was never used up and the loop hung; regression test `following_uses_up_repeated_operators` |
 | Fixed number of black variables, fixed domains: polynomial (ICAPS Thm. 1) | `Painting::bounded`, `product.rs` tree search with merged aggregate values | matches the ICAPS search; node budget and `h_FF` fallback are ours |
 
 Tests (for every strategy in both fragments, each with plain repair, forwarding and red facts
-following): `h_RB >= h_FF` (following: `>= h_max`), same dead ends, `all_red` equals
+following, and repair and following with `prefer_executable`): `h_RB >= h_FF` (following: `>= h_max`), same dead ends, `all_red` equals
 `h_FF`, every repair succeeds (and, for an out-of-fragment DAG painting, a failed repair
 costs exactly `h_FF`), every repaired plan valid under an independent red-black
 simulator with matching cost, and every strategy raises `h_RB` above `h_FF` somewhere. Unit
